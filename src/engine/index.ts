@@ -45,4 +45,7 @@ export * from './meta/rating';
 export * from './content/index';
 
 // ── tuning ───────────────────────────────────────────────────────────────────
+// Exported both by name (the UI needs TICK, rule caps, the Elo floor) and as a
+// namespace, so callers can choose between a focused import and the whole set.
+export * from './tuning';
 export * as TUNING from './tuning';

@@ -1,0 +1,72 @@
+/**
+ * ARCFORGE design tokens.
+ *
+ * One rule governs this file: if it glows, it is reporting a value. Colour is
+ * vocabulary, not decoration — cyan is energy and nominal state, amber is heat
+ * and strain, magenta is ion and disruption, red is structural loss. Nothing
+ * in the UI may use an accent for a meaning it does not carry.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ── substrate ─────────────────────────────────────────────────────────── */
+  --void: #05070d;
+  --void-deep: #03040a;
+  --surface-1: rgba(140, 200, 255, 0.035);
+  --surface-2: rgba(140, 200, 255, 0.06);
+  --surface-3: rgba(140, 200, 255, 0.1);
+  --line: rgba(125, 195, 255, 0.14);
+  --line-strong: rgba(125, 195, 255, 0.28);
+
+  /* ── ink ───────────────────────────────────────────────────────────────── */
+  --ink: #dbeaff;
+  --ink-dim: #8fa6c4;
+  --ink-faint: #5f7391;
+
+  /* ── vocabulary ────────────────────────────────────────────────────────── */
+  --cyan: #4de2ff;
+  --cyan-dim: #2a8fad;
+  --amber: #ffab4d;
+  --amber-dim: #a86f2e;
+  --magenta: #d98bff;
+  --magenta-dim: #8b55a8;
+  --red: #ff5c6a;
+  --green: #4dffb0;
+
+  /* house colours, matching DAMAGE_INFO in the engine */
+  --kinetic: #7fd4ff;
+  --thermal: #ffab4d;
+  --ion: #d98bff;
+
+  /* ── type ──────────────────────────────────────────────────────────────── */
+  --font-ui: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, Roboto, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, 'Cascadia Mono', Consolas, monospace;
+
+  /* ── geometry ──────────────────────────────────────────────────────────── */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 14px;
+  --gutter: 16px;
+
+  /* ── motion ────────────────────────────────────────────────────────────────
+     Borrowed from the simulation: things settle and cool, they never pop. */
+  --ease-settle: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-charge: cubic-bezier(0.7, 0, 0.84, 0);
+  --t-fast: 120ms;
+  --t-base: 220ms;
+  --t-slow: 420ms;
+
+  /* ── elevation ─────────────────────────────────────────────────────────── */
+  --glow-cyan: 0 0 0 1px rgba(77, 226, 255, 0.3), 0 0 24px -6px rgba(77, 226, 255, 0.55);
+  --glow-amber: 0 0 0 1px rgba(255, 171, 77, 0.3), 0 0 24px -6px rgba(255, 171, 77, 0.5);
+  --glow-red: 0 0 0 1px rgba(255, 92, 106, 0.35), 0 0 24px -6px rgba(255, 92, 106, 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --t-fast: 0ms;
+    --t-base: 0ms;
+    --t-slow: 0ms;
+  }
+}

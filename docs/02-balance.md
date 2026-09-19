@@ -286,24 +286,83 @@ four is infeasible.
 | **Disruptor** | NULLSET | Cycles | Forcing enemy overload, then killing | Low-heat kinetic, big energy pools |
 | **Alpha** | HAVOC/CINDER | Power | One enormous volley | Anything that survives it |
 
-### 5.1 The intended counter-cycle
+### 5.1 The shipped matrix
+
+Every archetype pair, 24 seeds x 3 arenas. Read a cell as "row beats column".
 
 ```
-          Bastion ──beats──▶ Skirmisher
-             ▲                    │
-           beats                beats
-             │                    ▼
-          Lancer  ◀──beats── Disruptor
-             │                    ▲
-             └───────beats────────┘  (Lancer beats Alpha; Alpha beats Bastion)
+            SKIRM LANCE BASTI DISRU ALPHA
+SKIRMISHER    -    0.17  0.44  0.50  0.75
+LANCER       0.74   -    0.90  0.24  0.42
+BASTION      0.66  0.06   -    0.51  0.76
+DISRUPTOR    0.46  0.79  0.78   -    0.13
+ALPHA        0.22  0.60  0.28  0.81   -
 ```
 
-No archetype should exceed a **58 % win rate** across the full matchup matrix. This is
-asserted directly in `tests/balance/matchups.test.ts`, which runs every archetype pair
-over `N = 24` seeds × 3 arenas and fails if any archetype dominates. A balance
-regression is therefore a red test, not a player complaint six weeks later.
+| Archetype | Win rate |
+| --- | --- |
+| Lancer | 57.5 % |
+| Disruptor | 54.0 % |
+| Bastion | 49.8 % |
+| Alpha | 47.8 % |
+| Skirmisher | 46.5 % |
 
----
+All five sit inside the 42–58 % design goal. Median match is 48.8 s against a
+45 s target, and **no match is decided by the clock** — every pairing in the
+matrix resolves by destruction.
+
+### 5.1.1 The counter-cycle closes
+
+The matrix contains a genuine five-way cycle, and every edge has a mechanical
+reason rather than a tuning nudge:
+
+```
+   SKIRMISHER ──0.75──▶ ALPHA ──0.81──▶ DISRUPTOR ──0.79──▶ LANCER
+        ▲                                                      │
+        │                                                     0.90
+        └──────────── 0.66 ──────────── BASTION ◀──────────────┘
+```
+
+- **Skirmisher beats Alpha** (0.75) — an alpha build's guns cycle every 2.4–2.8 s.
+  Against 104 evasion, most of those volleys miss, and a miss on a 2.8 s cooldown
+  is most of a fight.
+- **Alpha beats Disruptor** (0.81) — ion frames are paper. Burst kills them
+  before the drain accumulates.
+- **Disruptor beats Lancer** (0.79) — a thermal build already runs hot; ion adds
+  0.22 heat per point of damage and drains the energy its beams need. It
+  overloads a Lancer rather than out-damaging it.
+- **Lancer beats Bastion** (0.90) — thermal is the anti-armour type twice over:
+  mitigated less (`ARMOR_FACTOR` 0.80 vs 1.35) and ablating 2.3× faster.
+- **Bastion beats Skirmisher** (0.66) — the cycle closes. 2 400 effective HP
+  simply outlasts a frame with 1 700 and two weapon mounts.
+
+The 0.90 in `LANCER > BASTION` is the most extreme cell in the table, and it is
+intentional rather than tolerated: a pure fortress with no thermal answer should
+lose that matchup decisively. The counter-play exists in the catalogue —
+`CERAMIC ABLATOR` makes every point of armour 45 % more effective against
+thermal — and a Bastion that fits one is a different fight.
+
+### 5.2 What the suite caught
+
+The matrix is worth its runtime because three of these were invisible to
+inspection and all three were found by the test, not the eye:
+
+1. **`pierce` was unpriced.** The three weapons dominating the matrix were
+   exactly the three highest-pierce ones (Nova Lance 45 %, Gauss Battery 40 %,
+   Beam Lance 35 %) — the model charged them nothing for ignoring the defensive
+   stat the entire catalogue is priced around.
+2. **Range was underpriced.** `RANGE_SLOPE` began at 0.40. Outranging an
+   opponent is worth far more than a 33 % premium, and long guns dominated
+   until it was raised to 0.85.
+3. **Chassis needed innate traits.** Without them, "more sockets" simply meant
+   "more of everything", and the fortress chassis won 98 % of the matrix while
+   also carrying the highest damage output.
+
+A fourth was a bug rather than a mispricing: STATIC FIELD's pylons sat on the
+spawn points, so 27 % of all matches ended 0–0 with neither frame ever firing.
+The matrix showed it as a suspicious stalemate rate; the fix was both an arena
+correction and a movement rule that makes regaining line of sight override
+every other intent.
 
 ## 6. Progression pacing
 

@@ -1,0 +1,103 @@
+/** Reset and primitives. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--void);
+  /* Two very soft pools of light, so the void reads as a place rather than a
+     flat fill. Fixed attachment keeps them from sliding under scroll. */
+  background-image:
+    radial-gradient(1100px 620px at 12% -8%, rgba(77, 226, 255, 0.07), transparent 62%),
+    radial-gradient(900px 560px at 92% 108%, rgba(217, 139, 255, 0.055), transparent 60%);
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+/* Numbers are tabular everywhere so they do not jitter as they change. */
+.num,
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+}
+
+h1, h2, h3, h4 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+p { margin: 0; }
+button { font: inherit; color: inherit; }
+
+::selection {
+  background: rgba(77, 226, 255, 0.28);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--surface-3);
+  border-radius: 99px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--line-strong); background-clip: padding-box; }
+
+/* ── boot ──────────────────────────────────────────────────────────────── */
+.boot {
+  min-height: 100dvh;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 20px;
+}
+.boot__mark {
+  width: 46px;
+  height: 46px;
+  border: 2px solid var(--cyan);
+  border-radius: 10px;
+  animation: boot-pulse 1.4s var(--ease-settle) infinite;
+}
+.boot__text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: var(--ink-faint);
+}
+@keyframes boot-pulse {
+  0%, 100% { opacity: 0.25; transform: rotate(0deg) scale(0.92); }
+  50% { opacity: 1; transform: rotate(45deg) scale(1); box-shadow: var(--glow-cyan); }
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
