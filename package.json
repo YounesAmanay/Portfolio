@@ -1,0 +1,25 @@
+{
+  "name": "arcforge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ARCFORGE — a deterministic modular-robot autobattler. Forge the frame, write the doctrine, enter the Lattice.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "balance": "vitest run tests/balance --reporter=verbose"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10",
+    "vitest": "^2.1.4"
+  }
+}
