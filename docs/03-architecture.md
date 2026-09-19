@@ -164,10 +164,26 @@ A replay is not a video. It is:
 type Replay = { buildA: BuildSnapshot; buildB: BuildSnapshot; arenaId: string; seed: number };
 ```
 
-Four fields. Re-running `simulate()` reproduces the match tick-for-tick, which means
-replays cost ~1 KB, can be diffed, can be shared as a URL, and can be *verified* —
-a submitted result that doesn't reproduce is a forged result. Determinism pays for
-itself here.
+Four fields. Re-running `simulate()` reproduces the match tick-for-tick, which
+means replays cost a few hundred bytes, can be diffed, can be shared as a URL,
+and can be *verified* — a submitted result that doesn't reproduce is a forged
+result. Determinism pays for itself here.
+
+`meta/codec.ts` implements this. Parts encode as indices into the registry's
+id-sorted list, which is what keeps a whole frame under ~70 characters:
+
+```
+ARC1:<fingerprint>:<chassis>:<sockets>:<doctrine>:<name>
+```
+
+Indices are only meaningful against the catalogue that produced them, so every
+code carries a fingerprint of that catalogue and decoding *refuses* rather than
+guesses. The failure mode worth engineering against is not rejection — it is a
+code silently resolving to a different but valid build, which would make shared
+frames and verifiable replays worthless.
+
+Decoding never throws. It takes user input, so it returns a
+`DecodeResult<T>` discriminated union and the UI renders the reason.
 
 ## 7. Testing strategy
 

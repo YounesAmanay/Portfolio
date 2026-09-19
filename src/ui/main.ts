@@ -8,11 +8,13 @@
  */
 
 import { ratingBand } from '@engine/index';
+import { announce } from './components/announce';
 import { el, render } from './components/dom';
 import { disposeLattice, latticeView } from './views/lattice';
 import { armouryView } from './views/armoury';
 import { doctrineView } from './views/doctrine';
 import { forgeView } from './views/forge';
+import { importFromUrl } from './views/transfer';
 import { createSession, resetSession, save, type AppState, type ViewName } from './state/session';
 
 const VIEWS: readonly { id: ViewName; label: string }[] = [
@@ -57,7 +59,21 @@ function boot(): void {
     rerender();
   });
 
+  // A shared link opens straight into that frame. Handled on load *and* on
+  // hashchange: following a link to a page you already have open is a
+  // same-document navigation, so the module never re-executes.
+  const onHash = (): void => {
+    const outcome = importFromUrl(store);
+    if (outcome) {
+      announce(outcome.message, outcome.ok ? 'info' : 'error');
+      rerender();
+    }
+  };
+  window.addEventListener('hashchange', onHash);
+
+  const opened = importFromUrl(store);
   paint();
+  if (opened) announce(opened.message, opened.ok ? 'info' : 'error');
 }
 
 function viewFor(
@@ -74,7 +90,7 @@ function viewFor(
       return latticeView(store, rerender);
     case 'FORGE':
     default:
-      return forgeView(store);
+      return forgeView(store, rerender);
   }
 }
 

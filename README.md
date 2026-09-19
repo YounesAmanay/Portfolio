@@ -61,6 +61,25 @@ equipped are paid for in the same currency.
 Mass is never free: `agility = 1.25 − 0.50 × load` scales speed *and* evasion
 linearly, long before the cap makes a build illegal.
 
+## Build codes and replays
+
+Because a match is a pure function, a whole frame fits in a ~70-character code:
+
+```
+ARC1:mprwfp:3:b|9.6|_|j|x.v|r.u|_:1.2d.5,9.0.2,3
+```
+
+Share one and another Architect can fight your frame exactly as you built it —
+their result and yours agree, because the simulation is deterministic. A replay
+code carries two of those plus an arena and a seed, and re-running it
+reproduces the match tick for tick. That also makes a result *verifiable*: one
+that does not reproduce was forged.
+
+Codes encode parts as registry indices, so they carry a fingerprint of the
+catalogue they were written against and **refuse to decode** against a
+different one. The dangerous failure is not rejection, it is silently
+resolving to somebody else's loadout.
+
 ## Determinism is the product
 
 It makes builds comparable, replays shareable, balance testable in CI, and

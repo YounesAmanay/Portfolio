@@ -33,10 +33,11 @@ import {
   type SocketKind,
 } from '@engine/index';
 import { el, fmt, signed } from '../components/dom';
+import { transferPanel } from './transfer';
 import { owns, type AppState, type Profile } from '../state/session';
 import type { Store } from '../state/store';
 
-export function forgeView(store: Store<AppState>): HTMLElement {
+export function forgeView(store: Store<AppState>, rerender: () => void): HTMLElement {
   const state = store.get();
   const frame = compileFrame(state.build, REGISTRY);
   const report = validateBuild(frame, REGISTRY);
@@ -51,7 +52,7 @@ export function forgeView(store: Store<AppState>): HTMLElement {
       socketPanel(store, state, frame),
       cataloguePanel(store, state, frame),
     ),
-    el('div', { class: 'stack' }, readoutPanel(frame, report)),
+    el('div', { class: 'stack' }, readoutPanel(frame, report), transferPanel(store, rerender)),
   );
 }
 

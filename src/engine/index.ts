@@ -38,6 +38,7 @@ export * from './sim/simulate';
 export * from './sim/state';
 
 // ── meta ─────────────────────────────────────────────────────────────────────
+export * from './meta/codec';
 export * from './meta/economy';
 export * from './meta/rating';
 

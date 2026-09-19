@@ -17,6 +17,7 @@ import {
   computeReward,
   createMatch,
   createRng,
+  encodeReplay,
   describeEvent,
   energyRatio,
   heatRatio,
@@ -31,6 +32,7 @@ import {
   type MatchState,
   type SimEvent,
 } from '@engine/index';
+import { copyText, flash } from '../components/clipboard';
 import { el, fmt } from '../components/dom';
 import { ArenaRenderer } from '../render/arena-renderer';
 import { save, type AppState, type Profile } from '../state/session';
@@ -544,6 +546,24 @@ function afterAction(store: Store<AppState>, pb: Playback, rerender: () => void)
           disposeLattice();
           store.set((s) => ({ ...s, view: 'FORGE' }));
           rerender();
+        },
+      }),
+      el('button', {
+        class: 'btn',
+        text: 'COPY REPLAY CODE',
+        title: 'Four fields that reproduce this match exactly, on any device',
+        onclick: async (event: Event) => {
+          const button = event.currentTarget as HTMLButtonElement;
+          const code = encodeReplay(
+            {
+              buildA: pb.state.frames[0]!.frame.build,
+              buildB: pb.ghost.build,
+              arenaId: pb.state.arena.id,
+              seed: pb.state.seed,
+            },
+            REGISTRY,
+          );
+          flash(button, (await copyText(code)) ? 'COPIED' : 'FAILED');
         },
       }),
       el('button', {
