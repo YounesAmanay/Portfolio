@@ -10,6 +10,7 @@
 import { ratingBand } from '@engine/index';
 import { el, render } from './components/dom';
 import { disposeLattice, latticeView } from './views/lattice';
+import { armouryView } from './views/armoury';
 import { doctrineView } from './views/doctrine';
 import { forgeView } from './views/forge';
 import { createSession, resetSession, save, type AppState, type ViewName } from './state/session';
@@ -17,6 +18,7 @@ import { createSession, resetSession, save, type AppState, type ViewName } from 
 const VIEWS: readonly { id: ViewName; label: string }[] = [
   { id: 'FORGE', label: 'FORGE' },
   { id: 'DOCTRINE', label: 'DOCTRINE' },
+  { id: 'ARMOURY', label: 'ARMOURY' },
   { id: 'LATTICE', label: 'LATTICE' },
 ];
 
@@ -66,6 +68,8 @@ function viewFor(
   switch (state.view) {
     case 'DOCTRINE':
       return doctrineView(store);
+    case 'ARMOURY':
+      return armouryView(store);
     case 'LATTICE':
       return latticeView(store, rerender);
     case 'FORGE':

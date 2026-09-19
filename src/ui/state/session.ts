@@ -23,7 +23,7 @@ import { createStore, type Store } from './store';
 
 const STORAGE_KEY = 'arcforge.session.v1';
 
-export type ViewName = 'FORGE' | 'DOCTRINE' | 'LATTICE';
+export type ViewName = 'FORGE' | 'DOCTRINE' | 'ARMOURY' | 'LATTICE';
 
 export interface Profile {
   readonly callsign: string;

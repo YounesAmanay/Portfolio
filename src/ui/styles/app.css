@@ -590,3 +590,60 @@ option { background: var(--void); }
 .stack { display: grid; gap: 16px; }
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
+
+/* ════════════════════════════════════════════════════════════════════════════
+   Armoury
+   ════════════════════════════════════════════════════════════════════════════ */
+
+/* The Forge's catalogue is a scrolling drawer; the Armoury's is a full list. */
+.catalogue--open { max-height: none; overflow: visible; }
+
+.part-row--static { cursor: default; }
+.part-row--static:hover { background: var(--surface-1); border-color: var(--line); }
+
+.stock__action {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
+  text-align: right;
+}
+.stock__owned {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  color: var(--green);
+}
+.stock__reason {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-faint);
+  max-width: 150px;
+  line-height: 1.4;
+}
+
+.ladder {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 6px;
+}
+.ladder__step {
+  display: grid;
+  gap: 2px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-1);
+  opacity: 0.45;
+}
+.ladder__step--open {
+  opacity: 1;
+  border-color: rgba(77, 226, 255, 0.3);
+  background: rgba(77, 226, 255, 0.06);
+}
+.ladder__tier {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  color: var(--ink-faint);
+}
+.ladder__gate { font-family: var(--font-mono); font-size: 11px; color: var(--ink); }
