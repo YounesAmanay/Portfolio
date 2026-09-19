@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A second push to the same branch cancels the first: balance runs are the
+# slow part and there is no value in finishing a superseded one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Engine invariants: purity, determinism, the rulebook's worked example,
+      # compilation order, budget validation, doctrine ordering.
+      - name: Engine tests
+        run: npx vitest run tests/engine
+
+      # The unusual one. Re-derives every weapon's price from the balance model
+      # and plays the full archetype matrix over 24 seeds x 3 arenas. A design
+      # regression fails the build here rather than surfacing as a complaint
+      # six weeks later. See docs/02-balance.md.
+      - name: Balance suite
+        run: npm run balance
+
+      - name: Build
+        run: npm run build
