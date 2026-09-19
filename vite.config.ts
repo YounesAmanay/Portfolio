@@ -2,6 +2,8 @@ import { defineConfig } from 'vite';
 import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
+  // Relative asset paths, so the same build works from a filesystem, a preview
+  // server, and a GitHub Pages project subpath (/<repo>/) without rebuilding.
   base: './',
   resolve: {
     alias: {
