@@ -10,6 +10,8 @@ fight another Architect's machine with no human input at all.
 A match is a pure function of `(buildA, buildB, arena, seed)`. Same inputs,
 same result, every time, on every device.
 
+**Play it:** [live build](https://claude.ai/artifact/TXKvWji3KbE4XYhPpQwnHr)
+
 ```bash
 npm install
 npm run dev        # http://localhost:5173
@@ -121,6 +123,21 @@ not: armour pierce was entirely unpriced, range was charged a third of what it
 is worth, and one arena's pylons sat on the spawn points so a quarter of all
 matches ended 0–0 with neither frame ever firing. See
 [`docs/02-balance.md`](docs/02-balance.md) §5.2.
+
+## Hosting
+
+`.github/workflows/pages.yml` builds and deploys to GitHub Pages on every push
+to the default branch, gated behind typecheck and the full test suite so a red
+suite cannot ship a broken page.
+
+It needs **one manual step, once**: Settings → Pages → Build and deployment →
+Source → **GitHub Actions**. The workflow asks to enable Pages itself, but a
+GitHub App token usually lacks the scope to create a Pages site. After the
+toggle, re-run the workflow (or push anything) and the site publishes to
+`https://younesamanay.github.io/Portfolio/`.
+
+The build uses relative asset paths, so the same `dist/` works from a
+filesystem, a preview server and a project-pages subpath without rebuilding.
 
 ## Layout
 

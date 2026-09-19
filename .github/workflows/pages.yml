@@ -40,9 +40,17 @@ jobs:
 
       - run: npx vite build
 
-      # `enablement: true` turns Pages on for the repository the first time this
-      # runs, so the deploy does not require a manual settings toggle. Without
-      # it the action fails with "Get Pages site failed" on a fresh repo.
+      # ONE-TIME SETUP: this step fails until Pages is switched on for the
+      # repository, under Settings -> Pages -> Build and deployment ->
+      # Source: "GitHub Actions".
+      #
+      # `enablement: true` asks the action to create the Pages site itself,
+      # which works when the workflow token carries the Pages admin scope. A
+      # GitHub App installation token generally does not, and the step then
+      # reports "Create Pages site failed: Resource not accessible by
+      # integration". It is left on so the workflow self-heals wherever the
+      # token is sufficient; where it is not, flip the setting once and every
+      # later push deploys on its own.
       - uses: actions/configure-pages@v5
         with:
           enablement: true
