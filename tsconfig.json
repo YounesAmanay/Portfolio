@@ -23,7 +23,9 @@
     "baseUrl": ".",
     "paths": {
       "@engine/*": ["src/engine/*"],
-      "@ui/*": ["src/ui/*"]
+      "@ui/*": ["src/ui/*"],
+      "@kinetic/*": ["src/kinetic/*"],
+      "@render/*": ["src/render/*"]
     }
   },
   "include": ["src", "tests", "vite.config.ts", "vitest.config.ts"]

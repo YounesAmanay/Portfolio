@@ -9,6 +9,8 @@ export default defineConfig({
     alias: {
       '@engine': fileURLToPath(new URL('./src/engine', import.meta.url)),
       '@ui': fileURLToPath(new URL('./src/ui', import.meta.url)),
+      '@kinetic': fileURLToPath(new URL('./src/kinetic', import.meta.url)),
+      '@render': fileURLToPath(new URL('./src/render', import.meta.url)),
     },
   },
   build: { target: 'es2022', outDir: 'dist', sourcemap: true },
