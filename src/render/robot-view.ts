@@ -75,7 +75,9 @@ export class RobotView {
         object.userData.wheelUid = placement.uid;
         this.#wheelObjects.push(object);
         this.root.add(object);
-      } else if (part.weapon && (part.weapon.kind === 'SPINNER' || part.weapon.kind === 'SAW')) {
+      } else if (part.weapon) {
+        // Every weapon has its own body on a hinge now, not just the spinners,
+        // so hammers and flippers animate through the same path.
         object.userData.weaponUid = placement.uid;
         this.#weaponObjects.push(object);
         this.root.add(object);

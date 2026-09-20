@@ -81,11 +81,13 @@ export const BRUISER: Design = build('BRUISER', [
   { part: 'bat.lipo6s', at: [1, 3, 1] },
   { part: 'bat.supercap', at: [1, 3, 3] },
   { part: 'ctl.advanced', at: [1, 3, 5] },
-  { part: 'arm.steel', at: [1, 3, 7] },
-  // The spinner overhangs the nose on its own rail, so its swept circle never
-  // meets a wheel.
+  // Forward is +Z, so the spinner leads and the steel plate covers the tail.
+  // It used to be the other way round with a comment claiming otherwise: the
+  // bar was hung off the back of a machine described as leading with it.
+  { part: 'str.rail', at: [1, 2, 7] },
+  { part: 'wpn.bar', at: [-1, 3, 8] },
   { part: 'str.rail', at: [1, 2, -2] },
-  { part: 'wpn.bar', at: [-1, 3, -2] },
+  { part: 'arm.steel', at: [1, 3, -2] },
 ]);
 
 /** Tracks and titanium. Enormous grip, hard to flip, no weapon at all. */

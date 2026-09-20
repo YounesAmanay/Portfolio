@@ -17,6 +17,19 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { AMBIENT_C, PHYSICS_DT, clamp, clamp01 } from '../core/units';
 import {
+  ARM_DAMPING_RATIO,
+  CONTACT_THRESHOLD,
+  FLIPPER_DWELL,
+  FLIPPER_RELOAD,
+  FLIPPER_REST,
+  FLIPPER_STRIKE,
+  HAMMER_DWELL,
+  HAMMER_RELOAD,
+  HAMMER_REST,
+  HAMMER_STRIKE,
+  SPINNER_TORQUE_CEILING,
+} from '../core/tuning';
+import {
   occupiedCells,
   partOf,
   placementCentre,
@@ -62,12 +75,21 @@ export interface WheelRuntime {
   attached: boolean;
 }
 
+/** Where an arm weapon is in its cycle. */
+export type ArmPhase = 'READY' | 'STRIKING' | 'DWELL' | 'RETURNING' | 'RELOADING';
+
 export interface WeaponRuntime {
   readonly placement: Placement;
   readonly part: PartDef;
   readonly body: RAPIER.RigidBody | null;
   readonly joint: RAPIER.ImpulseJoint | null;
+  /** Hinge axis in chassis space, for reading the true spin rate back. */
+  readonly axis: RAPIER.Vector3;
+  /** Spin rate about that axis, rad/s. Spinners only. */
   spin: number;
+  phase: ArmPhase;
+  /** Seconds remaining in the current phase. */
+  timer: number;
   cooldown: number;
   attached: boolean;
 }
@@ -114,13 +136,64 @@ export interface RobotHandle {
 }
 
 const UP: RAPIER.Vector3 = { x: 0, y: 1, z: 0 };
+/** Lateral axis: arm weapons hinge about it, so they swing fore and aft. */
+const LATERAL: RAPIER.Vector3 = { x: 1, y: 0, z: 0 };
+const ZERO: RAPIER.Vector3 = { x: 0, y: 0, z: 0 };
+const IDENTITY: RAPIER.Rotation = { x: 0, y: 0, z: 0, w: 1 };
+
+interface Extents {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+/**
+ * Where an arm weapon hinges, relative to its own centre.
+ *
+ * A hammer pivots at the low rear corner so its head describes a downward arc
+ * over the nose. A flipper hinges at the low *front* edge, because a flipper
+ * scoops from underneath — hinge it at the back and the plate rises behind the
+ * target instead of beneath it. Forward is +Z throughout.
+ */
+function armPivot(kind: string, half: Extents): RAPIER.Vector3 {
+  if (kind === 'FLIPPER') return { x: 0, y: -half.y * 0.8, z: half.z * 0.9 };
+  return { x: 0, y: -half.y * 0.55, z: -half.z * 0.7 };
+}
+
+/** The striking mass: the head of a hammer, the plate of a flipper. */
+function armHead(kind: string, half: Extents): { half: Extents; offset: RAPIER.Vector3 } {
+  if (kind === 'FLIPPER') {
+    return {
+      half: { x: half.x * 0.9, y: half.y * 0.35, z: half.z * 0.85 },
+      offset: { x: 0, y: 0, z: 0 },
+    };
+  }
+  return {
+    half: { x: half.x * 0.85, y: half.y * 0.3, z: half.z * 0.22 },
+    offset: { x: 0, y: half.y * 0.2, z: half.z * 0.55 },
+  };
+}
+
+/** Travel stops for an arm, radians about its hinge. */
+function armLimits(kind: string): { min: number; max: number } {
+  return kind === 'FLIPPER'
+    ? { min: FLIPPER_REST - 0.05, max: FLIPPER_STRIKE + 0.05 }
+    : { min: HAMMER_REST - 0.05, max: HAMMER_STRIKE + 0.05 };
+}
+
+/** Rest and strike angles for an arm, radians. */
+function armAngles(kind: string): { rest: number; strike: number; dwell: number; reload: number } {
+  return kind === 'FLIPPER'
+    ? { rest: FLIPPER_REST, strike: FLIPPER_STRIKE, dwell: FLIPPER_DWELL, reload: FLIPPER_RELOAD }
+    : { rest: HAMMER_REST, strike: HAMMER_STRIKE, dwell: HAMMER_DWELL, reload: HAMMER_RELOAD };
+}
 
 /**
  * Contact force below which no event is raised, in newtons. Set well above the
  * weight of a machine resting on its own wheels, or every frame reports the
  * floor pushing back and the damage model drowns in noise.
  */
-const CONTACT_THRESHOLD = 260;
+// Contact threshold and weapon timings live in core/tuning.
 
 /**
  * Wheel spin axis in chassis space. A pod at yaw 0 spins about X, so the
@@ -308,12 +381,12 @@ export function spawnRobot(
 
     // ── everything else ───────────────────────────────────────────────────
     const half = placementHalfExtents(placement);
-    // A spinning weapon lives in its own body, so it must NOT also get a
+    // Every weapon lives in its own body on a hinge, so it must NOT also get a
     // collider on the chassis: two solids in the same place resolve their
     // overlap explosively and launch the machine across the arena.
-    const spins = part.weapon?.kind === 'SPINNER' || part.weapon?.kind === 'SAW';
+    const moves = part.weapon !== undefined;
 
-    if (!spins) {
+    if (!moves) {
       const collider = world.createCollider(
         RAPIER.ColliderDesc.cuboid(half.x, half.y, half.z)
           .setTranslation(local.x, local.y, local.z)
@@ -332,40 +405,117 @@ export function spawnRobot(
       thrusters.push({ placement, part, offset: local, attached: true });
     }
 
-    if (spins && part.weapon) {
-      // Spinners are their own body so their stored energy is real: a heavy
-      // disc at speed carries genuine angular momentum, and the chassis feels
-      // the reaction torque when it spins up.
-      const spinPos = toWorld(local);
-      const spinBody = world.createRigidBody(
+    if (part.weapon) {
+      // Every weapon is a real body on a real hinge.
+      //
+      // Spinners already were, so their stored energy is honest: a heavy disc
+      // at speed carries genuine angular momentum and the chassis feels the
+      // reaction torque. Hammers and flippers were not. They had no body at
+      // all and "firing" applied an impulse to the machine's own centre of
+      // mass — upward for a flipper, downward for a hammer — so a flipper
+      // launched *itself* twelve metres into the air and never touched the
+      // opponent, and a hammer shoved its own chassis into the floor. Neither
+      // weapon could hit anything, because neither weapon moved.
+      const spins = part.weapon.kind === 'SPINNER' || part.weapon.kind === 'SAW';
+      const bodyPos = toWorld(local);
+      const body = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
-          .setTranslation(spinPos.x, spinPos.y, spinPos.z)
+          .setTranslation(bodyPos.x, bodyPos.y, bodyPos.z)
           .setRotation(spawnRotation)
-          .setAngularDamping(0.015)
+          .setAngularDamping(spins ? 0.015 : 0.4)
           .setCanSleep(false),
       );
-      // Swept radius of the weapon, from its own footprint plus its reach.
-      const reach = Math.max(half.x, half.z) + part.weapon.reach;
-      world.createCollider(
-        RAPIER.ColliderDesc.cylinder(Math.max(0.012, half.y * 0.8), reach)
+
+      if (spins) {
+        // Swept disc: the collider is the circle the blade sweeps, because
+        // that is the volume that can actually hit something.
+        const reach = Math.max(half.x, half.z) + part.weapon.reach;
+        const shape = RAPIER.ColliderDesc.cylinder(Math.max(0.012, half.y * 0.8), reach)
           .setFriction(0.35)
           .setRestitution(0.5)
-          .setMass(part.mass)
           .setCollisionGroups(groups)
           .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
-          .setContactForceEventThreshold(CONTACT_THRESHOLD),
-        spinBody,
-      );
-      const spinJoint = world.createImpulseJoint(
-        RAPIER.JointData.revolute(local, { x: 0, y: 0, z: 0 }, UP),
+          .setContactForceEventThreshold(CONTACT_THRESHOLD);
+
+        // The declared moment of inertia, not the one the swept cylinder
+        // implies. The builder shows a spinner's stored energy as ½Iω² taken
+        // from `inertia`; a solid cylinder of the swept radius works out
+        // roughly three times heavier in rotation, so the readout and the
+        // simulation disagreed about both spin-up time and hit energy. The
+        // number the player is shown is the one that wins.
+        const spin = part.weapon.inertia;
+        world.createCollider(
+          spin !== undefined
+            ? shape.setMassProperties(
+                part.mass,
+                ZERO,
+                // Thin disc: half about each transverse axis, as it should be.
+                { x: spin * 0.5, y: spin, z: spin * 0.5 },
+                IDENTITY,
+              )
+            : shape.setMass(part.mass),
+          body,
+        );
+      } else {
+        // The business end only: a hammer is its head, not its whole envelope.
+        const head = armHead(part.weapon.kind, half);
+        world.createCollider(
+          RAPIER.ColliderDesc.cuboid(head.half.x, head.half.y, head.half.z)
+            .setTranslation(head.offset.x, head.offset.y, head.offset.z)
+            .setFriction(0.6)
+            .setRestitution(0.2)
+            .setMass(part.mass)
+            .setCollisionGroups(groups)
+            .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+            .setContactForceEventThreshold(CONTACT_THRESHOLD),
+          body,
+        );
+      }
+
+      // Spinners turn about their mount; arms hinge sideways so they swing
+      // fore and aft, which is the only direction that reaches a target.
+      const axis = spins ? UP : LATERAL;
+      const pivot = spins ? ZERO : armPivot(part.weapon.kind, half);
+      const joint = world.createImpulseJoint(
+        RAPIER.JointData.revolute(
+          { x: local.x + pivot.x, y: local.y + pivot.y, z: local.z + pivot.z },
+          pivot,
+          axis,
+        ),
         chassis,
-        spinBody,
+        body,
         true,
       );
-      weapons.push({ placement, part, body: spinBody, joint: spinJoint, spin: 0, cooldown: 0, attached: true });
-    } else if (part.weapon) {
-      // Flippers and hammers act through the chassis, so they need no body.
-      weapons.push({ placement, part, body: null, joint: null, spin: 0, cooldown: 0, attached: true });
+
+      if (!spins) {
+        const revolute = joint as RAPIER.RevoluteImpulseJoint;
+        // Force-based, not acceleration-based: the default model ignores the
+        // driven body's inertia, which would make a heavy head swing exactly as
+        // fast as a light one and delete the reason mass is a stat on a hammer.
+        revolute.configureMotorModel(RAPIER.MotorModel.ForceBased);
+        // Stops on the swing, so an arm cannot wind itself round and round.
+        const limits = armLimits(part.weapon.kind);
+        revolute.setLimits(limits.min, limits.max);
+      }
+      // Spinners get no motor configured at all. Touching the motor model on a
+      // free-spinning joint enables the motor with a zero-velocity target, and
+      // it then holds the blade at a dead stop — which is precisely what it was
+      // doing: a manual 2.2 N·m torque impulse applied straight to the disc for
+      // a full second produced an angular velocity of 0.00 rad/s.
+      // They are driven by torque impulses in driveRobot instead.
+
+      weapons.push({
+        placement,
+        part,
+        body,
+        joint,
+        axis,
+        spin: 0,
+        phase: 'READY',
+        timer: 0,
+        cooldown: 0,
+        attached: true,
+      });
     }
   }
 
@@ -482,37 +632,177 @@ export function driveRobot(robot: RobotHandle, input: ControlInput): void {
   // ── 4. weapons ────────────────────────────────────────────────────────────
   const fire = clamp01(input.weapon) * robot.sag;
   for (const weapon of robot.weapons) {
-    if (!weapon.attached || !weapon.part.weapon) continue;
+    if (!weapon.attached || !weapon.part.weapon || !weapon.joint) continue;
     const spec = weapon.part.weapon;
 
     if (spec.kind === 'SPINNER' || spec.kind === 'SAW') {
-      const joint = weapon.joint as RAPIER.RevoluteImpulseJoint | null;
-      if (joint && spec.maxSpin) {
-        joint.configureMotorVelocity(spec.maxSpin * fire, spec.drive / spec.maxSpin);
-        const body = weapon.body;
-        if (body) weapon.spin = Math.abs(body.angvel().y);
+      if (spec.maxSpin === undefined) continue;
+
+      // A velocity motor with its torque capped at the part's rating. The
+      // previous call passed `drive / maxSpin` as the motor's damping, which
+      // for a 2.2 N·m disc rated at 6000 rpm is 0.0035 — so small that the
+      // motor did essentially nothing. Measured, the blade reached 0.0 of its
+      // rated 628 rad/s after three seconds at full throttle. The flagship
+      // weapon in the game did not turn.
+      // Driven by torque impulses, not by the joint motor.
+      //
+      // Rapier's velocity motor takes a gain rather than a force limit, and to
+      // apply a 2.2 N·m torque against a 628 rad/s error the gain has to be
+      // 0.0035 — which makes the constraint so soft that the solver does
+      // essentially nothing. Measured, the blade held 0.00 rad/s through eight
+      // seconds at full throttle either way: the game's flagship weapon did not
+      // turn, and had not for as long as it had existed.
+      //
+      // The wheels already solve this correctly, so spinners now do it the same
+      // way: a DC torque curve applied as an impulse, with the equal and
+      // opposite reaction applied to the chassis. That reaction is not a detail
+      // — it is why a big spinner fights its own steering.
+      const current = spinRate(weapon, robot);
+      const torque =
+        spec.drive * SPINNER_TORQUE_CEILING * fire * clamp(1 - current / spec.maxSpin, -1, 1);
+      const axisWorld = rotateVector(weapon.axis, robot.chassis.rotation());
+      const tick = torque * PHYSICS_DT;
+      const body = weapon.body;
+      if (body) {
+        body.applyTorqueImpulse(
+          { x: axisWorld.x * tick, y: axisWorld.y * tick, z: axisWorld.z * tick },
+          true,
+        );
+        robot.chassis.applyTorqueImpulse(
+          { x: -axisWorld.x * tick, y: -axisWorld.y * tick, z: -axisWorld.z * tick },
+          true,
+        );
       }
+      weapon.spin = Math.abs(spinRate(weapon, robot));
       continue;
     }
 
-    weapon.cooldown = Math.max(0, weapon.cooldown - PHYSICS_DT);
-    if (fire > 0.5 && weapon.cooldown === 0) {
-      weapon.cooldown = spec.kind === 'FLIPPER' ? 2.5 : 1.2;
-      const rotation = robot.chassis.rotation();
-      const dir = rotateVector(spec.kind === 'FLIPPER' ? UP : { x: 0, y: -1, z: 0 }, rotation);
-      const impulse = spec.drive * PHYSICS_DT * 12;   // already a one-shot
-      robot.chassis.applyImpulseAtPoint(
-        { x: dir.x * impulse, y: dir.y * impulse, z: dir.z * impulse },
-        worldPoint(robot.chassis, { x: 0, y: 0, z: 0 }),
-        true,
-      );
-    }
+    stepArm(weapon, robot, fire > 0.5);
   }
 
   // ── 5. energy ─────────────────────────────────────────────────────────────
   if (demand > 0 && hasEnergy) {
     robot.energy = Math.max(0, robot.energy - (demand * robot.sag * PHYSICS_DT) / 3600);
   }
+}
+
+/**
+ * True spin rate of a weapon about its own hinge, rad/s.
+ *
+ * Reading `angvel().y` was wrong the moment the machine tilted: it measures
+ * rotation about the *world* vertical, not about the axis the blade actually
+ * turns on, so a spinner on a machine up on two wheels reported a speed it did
+ * not have. Projecting onto the hinge axis in world space is the honest
+ * measurement, and it is the number the damage model reads.
+ */
+function spinRate(weapon: WeaponRuntime, robot: RobotHandle): number {
+  const body = weapon.body;
+  if (!body) return 0;
+  const axis = rotateVector(weapon.axis, robot.chassis.rotation());
+  const relative = body.angvel();
+  return relative.x * axis.x + relative.y * axis.y + relative.z * axis.z;
+}
+
+/**
+ * One step of a hammer or flipper cycle.
+ *
+ * The arm is driven to an angle by its joint motor rather than thrown by an
+ * impulse, so the damage it does is whatever its head's momentum actually
+ * delivers on contact. That is the whole point: a hammer hurts because a
+ * weighted head arrives fast, not because a number was added somewhere.
+ *
+ * READY -> STRIKING -> DWELL -> RETURNING -> RELOADING -> READY. The dwell is
+ * what stops the arm bouncing straight back off the target, and the reload is
+ * what makes firing a decision rather than a button you hold.
+ */
+function stepArm(weapon: WeaponRuntime, robot: RobotHandle, firing: boolean): void {
+  const spec = weapon.part.weapon;
+  const joint = weapon.joint as RAPIER.RevoluteImpulseJoint | null;
+  if (!spec || !joint) return;
+
+  const { rest, strike, dwell, reload } = armAngles(spec.kind);
+
+  // Rated torque at full deflection, so `drive` means the same thing for an
+  // arm as it does for a spinner: how hard this actuator can push.
+  const swing = Math.max(0.2, Math.abs(strike - rest));
+  const stiffness = spec.drive / swing;
+  // Roughly critical for a head of this mass at this radius.
+  const inertia = Math.max(0.005, weapon.part.mass * 0.02);
+  const damping = 2 * ARM_DAMPING_RATIO * Math.sqrt(stiffness * inertia);
+
+  weapon.timer = Math.max(0, weapon.timer - PHYSICS_DT);
+
+  switch (weapon.phase) {
+    case 'READY':
+      if (firing) {
+        weapon.phase = 'STRIKING';
+        // Generous: the arm is allowed longer than it should need, so a swing
+        // blocked by the target it just hit still completes its cycle.
+        weapon.timer = 0.6;
+      }
+      break;
+    case 'STRIKING':
+      if (weapon.timer === 0 || armReached(weapon, robot, strike)) {
+        weapon.phase = 'DWELL';
+        weapon.timer = dwell;
+      }
+      break;
+    case 'DWELL':
+      if (weapon.timer === 0) {
+        weapon.phase = 'RETURNING';
+        weapon.timer = 0.6;
+      }
+      break;
+    case 'RETURNING':
+      if (weapon.timer === 0 || armReached(weapon, robot, rest)) {
+        weapon.phase = 'RELOADING';
+        weapon.timer = reload;
+      }
+      break;
+    case 'RELOADING':
+      if (weapon.timer === 0) weapon.phase = 'READY';
+      break;
+  }
+
+  const target = weapon.phase === 'STRIKING' || weapon.phase === 'DWELL' ? strike : rest;
+  joint.configureMotorPosition(target, stiffness, damping);
+  weapon.cooldown = weapon.phase === 'READY' ? 0 : Math.max(weapon.timer, 0);
+}
+
+/** Is the arm within a few degrees of the angle it was told to reach? */
+function armReached(weapon: WeaponRuntime, robot: RobotHandle, target: number): boolean {
+  const body = weapon.body;
+  if (!body) return true;
+  const angle = armAngle(weapon, robot);
+  return Math.abs(angle - target) < 0.09;
+}
+
+/**
+ * The arm's current angle about its hinge, radians.
+ *
+ * Taken from the relative rotation of the two bodies rather than from the
+ * joint, because Rapier's impulse joints do not report their own position.
+ */
+function armAngle(weapon: WeaponRuntime, robot: RobotHandle): number {
+  const body = weapon.body;
+  if (!body) return 0;
+  const chassisRotation = robot.chassis.rotation();
+  const relative = multiplyQuaternions(conjugate(chassisRotation), body.rotation());
+  // Hinge is the lateral axis, so the swing shows up as rotation about x.
+  return 2 * Math.atan2(relative.x, relative.w);
+}
+
+function conjugate(q: RAPIER.Rotation): RAPIER.Rotation {
+  return { x: -q.x, y: -q.y, z: -q.z, w: q.w };
+}
+
+function multiplyQuaternions(a: RAPIER.Rotation, b: RAPIER.Rotation): RAPIER.Rotation {
+  return {
+    w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z,
+    x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y,
+    y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
+    z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
+  };
 }
 
 /** Motors above their continuous rating lose torque, and stalling cooks them. */
