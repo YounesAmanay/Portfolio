@@ -83,21 +83,35 @@ export class ArenaSession {
     const spec = this.options.spec;
     const size = spec.size;
 
+    const span = size * 1.4;
+    const slick = spec.surface.friction < 0.6;
+
+    // One texture repeat per metre, so a cell is always a metre of real floor
+    // and the eye can read speed straight off it.
     const floor = new THREE.Mesh(
-      new THREE.BoxGeometry(size * 1.4, 0.5, size * 1.4),
+      new THREE.BoxGeometry(span, 0.5, span),
       new THREE.MeshStandardMaterial({
-        color: spec.surface.friction < 0.6 ? '#1b2430' : '#171e28',
-        metalness: spec.surface.friction < 0.6 ? 0.85 : 0.35,
-        roughness: spec.surface.friction < 0.6 ? 0.18 : 0.9,
+        map: floorTexture(slick),
+        color: slick ? '#1b2430' : '#171e28',
+        metalness: slick ? 0.85 : 0.35,
+        roughness: slick ? 0.18 : 0.9,
       }),
     );
+    const map = (floor.material as THREE.MeshStandardMaterial).map;
+    if (map) map.repeat.set(span, span);
     floor.position.y = -0.25;
     floor.receiveShadow = true;
     this.root.add(floor);
 
-    const grid = new THREE.GridHelper(size * 1.4, Math.round(size * 1.4), '#2b5670', '#1b2d3c');
-    grid.position.y = 0.003;
-    this.root.add(grid);
+    // Two grids at fixed world cell sizes, not a fixed division count.
+    //
+    // The previous grid divided the floor into one-metre cells, but the chase
+    // camera sits about two metres from a machine half a metre wide, so barely
+    // a metre and a half of floor is ever on screen — often with no grid line
+    // in it at all. The floor read as a black void and nothing conveyed speed.
+    // 25 cm cells guarantee several lines in frame at any chase distance; the
+    // metre grid on top gives a coarser reference that survives motion blur.
+    // The floor markings are a texture, not geometry — see floorTexture.
 
     const wallMaterial = new THREE.MeshStandardMaterial({
       color: '#202935', metalness: 0.7, roughness: 0.45,
@@ -205,4 +219,62 @@ export class ArenaSession {
     this.root.removeFromParent();
     this.physics.dispose();
   }
+}
+
+/**
+ * The arena floor's markings, as a repeating texture rather than a GridHelper.
+ *
+ * Two grid helpers drew the floor before this, correctly, and the arena still
+ * read as a black void. A line is one device pixel wide no matter how close
+ * the camera gets, so at the chase camera's couple of metres the cells under
+ * the machine were invisible, while the distant ones piled into a smear along
+ * the horizon — exactly backwards from what conveys speed. A texture gets
+ * mipmaps and anisotropic filtering, so the cell beside the wheels reads as
+ * clearly as the one at the far wall.
+ *
+ * Drawn once per arena at 512px for a one-metre cell: quarter-metre gridlines
+ * inside a brighter metre boundary, plus a corner tick that gives the eye
+ * something asymmetric to track when the machine spins.
+ */
+function floorTexture(slick: boolean): THREE.CanvasTexture {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('2D canvas unavailable for the arena floor');
+
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, size, size);
+
+  // Quarter-metre subdivisions, faint.
+  ctx.strokeStyle = slick ? 'rgba(150,205,235,0.30)' : 'rgba(120,180,215,0.24)';
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  for (let i = 1; i < 4; i += 1) {
+    const at = (size / 4) * i;
+    ctx.moveTo(at, 0);
+    ctx.lineTo(at, size);
+    ctx.moveTo(0, at);
+    ctx.lineTo(size, at);
+  }
+  ctx.stroke();
+
+  // The metre boundary, and a tick at its corner for rotational reference.
+  ctx.strokeStyle = 'rgba(110,215,255,0.62)';
+  ctx.lineWidth = 7;
+  ctx.strokeRect(0, 0, size, size);
+  ctx.lineWidth = 11;
+  ctx.beginPath();
+  ctx.moveTo(0, size * 0.14);
+  ctx.lineTo(0, 0);
+  ctx.lineTo(size * 0.14, 0);
+  ctx.stroke();
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.anisotropy = 8;
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }

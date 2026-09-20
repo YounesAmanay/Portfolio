@@ -30,6 +30,13 @@ const DEFAULT_LIMITS: OrbitLimits = {
   maxPolar: 87 * DEG,
 };
 
+/**
+ * How much room to leave around a framed object, as a multiple of its radius.
+ * Fitting the bounding sphere exactly reads as cramped, because the sphere is
+ * bigger than the machine inside it.
+ */
+const FRAME_MARGIN = 1.35;
+
 export class OrbitCamera {
   /** Where the camera looks. Follow mode eases this toward a moving object. */
   readonly target = new THREE.Vector3(0, 0.5, 0);
@@ -78,10 +85,17 @@ export class OrbitCamera {
 
   frame(centre: THREE.Vector3, radius: number): void {
     this.#goalTarget.copy(centre);
-    // Fit the sphere in view with a little margin.
-    const fov = (this.camera.fov * Math.PI) / 180;
+
+    // Fit against whichever field of view is tighter. `camera.fov` is the
+    // vertical one, so fitting to it alone overflows the width on any portrait
+    // viewport: at 390x844 the horizontal field is less than half as wide, and
+    // a phone cropped the machine it was supposed to be framing.
+    const vertical = (this.camera.fov * Math.PI) / 180;
+    const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * this.camera.aspect);
+    const fit = Math.min(vertical, horizontal);
+
     this.#goalDistance = THREE.MathUtils.clamp(
-      (radius * 1.7) / Math.tan(fov / 2),
+      (radius * FRAME_MARGIN) / Math.tan(fit / 2),
       this.limits.minDistance,
       this.limits.maxDistance,
     );

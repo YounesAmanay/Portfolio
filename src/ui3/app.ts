@@ -104,9 +104,12 @@ class App {
     this.camera.setAutoSpin(0);
     // Chase distance follows the machine's own size: a 40 cm scout and a
     // 1.2 m siege tank need very different framing to read at all.
-    const bounds = machineRadius(this.design);
-    this.camera.frame(new THREE.Vector3(0, 0.3, 0), Math.max(0.9, bounds * 2.4));
-    this.camera.setAngles(28, 54);
+    // Frame the machine itself, not a generous sphere around it. The old
+    // 0.9 m floor meant a 40 cm scout was framed as if it were 1.8 m across,
+    // which on a portrait phone left it a speck in the middle of the screen.
+    const radius = Math.max(0.26, machineRadius(this.design));
+    this.camera.frame(new THREE.Vector3(0, 0.26, 0), radius * 1.25);
+    this.camera.setAngles(28, 58);
     this.#renderChrome();
   }
 

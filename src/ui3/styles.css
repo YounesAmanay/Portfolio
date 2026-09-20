@@ -329,9 +329,11 @@ option { background: var(--panel-solid); }
   .hud__big { font-size: 34px; }
   .hud__status { top: 58px; }
 
-  .stick { left: 14px; bottom: calc(86px + env(safe-area-inset-bottom)); width: 104px; height: 104px; }
+  /* The stick clears the gauges: 6px inset + 88px of gauge + 12px of air.
+     At 86px the knob sat on top of the speed readout it exists to move. */
+  .stick { left: 14px; bottom: calc(106px + env(safe-area-inset-bottom)); width: 104px; height: 104px; }
   .stick__knob { width: 46px; height: 46px; margin: -23px 0 0 -23px; }
-  .touch-cluster { right: 14px; bottom: calc(86px + env(safe-area-inset-bottom)); gap: 8px; }
+  .touch-cluster { right: 14px; bottom: calc(106px + env(safe-area-inset-bottom)); gap: 8px; }
   .touch-btn { width: 64px; height: 64px; }
 }
 
@@ -341,7 +343,8 @@ option { background: var(--panel-solid); }
   .stick { bottom: calc(10px + env(safe-area-inset-bottom)); width: 92px; height: 92px; }
   .touch-cluster { bottom: calc(10px + env(safe-area-inset-bottom)); grid-auto-flow: column; }
   .touch-btn { width: 56px; height: 56px; }
-  .gauges { width: 132px; }
+  /* Both bottom corners belong to the thumbs here, so the gauges go up top. */
+  .gauges { width: 132px; top: 52px; bottom: auto; }
   .hud__big { font-size: 26px; }
   .hint { display: none; }
 }
