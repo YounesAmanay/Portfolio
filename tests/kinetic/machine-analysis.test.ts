@@ -166,7 +166,10 @@ describe('the physics the solver does not do', () => {
     const report = analyseBuild(beetle());
     expect(report.gripLimited).toBe(true);
     expect(report.tractiveEffort).toBeLessThan(report.totalTorque / 0.025);
-    expect(report.problems.some((p) => p.message.startsWith('Grip-limited'))).toBe(true);
+    // And says so, because this one is carrying gearing it can never use.
+    // Being grip-limited at all is normal and goes unremarked; three times
+    // over is wasted weight.
+    expect(report.problems.some((p) => p.message.includes('than the tyres can put down'))).toBe(true);
   });
 
   it('caps a grip-limited climb with tan, not asin', () => {

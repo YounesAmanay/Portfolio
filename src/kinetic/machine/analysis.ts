@@ -275,12 +275,17 @@ export function analyseBuild(build: Build): MachineAnalysis {
       });
     }
 
-    if (gripLimited) {
+    // Being grip-limited is the normal state of a combat robot — you gear for
+    // push and accept that the floor gives out first. Saying so on every
+    // machine is noise, so this fires only when the excess is large enough
+    // that the gearing and motor mass are being carried for nothing.
+    if (gripLimited && fromTorque > fromGrip * 3) {
       problems.push({
         severity: 'warning',
         message:
-          'Grip-limited, not torque-limited: the tyres will spin before the motors strain. ' +
-          'More weight over the driven wheels, stickier tyres, or less reduction.',
+          `${(fromTorque / fromGrip).toFixed(1)}x more tractive effort than the tyres can put down. ` +
+          'The extra gearing and motor are weight you cannot use: gear it higher, or put more ' +
+          'weight over the driven wheels.',
       });
     }
   }
