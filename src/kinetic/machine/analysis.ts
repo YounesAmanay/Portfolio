@@ -83,7 +83,43 @@ export interface MachineAnalysis {
   readonly integrity: number;
   readonly cost: number;
 
+  /** The three things a machine is, and their sum. */
+  readonly rating: Rating;
+
   readonly problems: readonly Fault[];
+}
+
+/**
+ * What a machine is worth, in three numbers and a total.
+ *
+ * Every build screen worth using has one figure you can watch move, because
+ * the whole activity is "is this edit better than the last one" and answering
+ * that by comparing nine readouts is work. This is that figure.
+ *
+ * It is derived, never authored, and each part of it has units behind it:
+ *
+ * - **DRIVE** is the mechanical power the machine can actually put on the
+ *   floor, watts. Force times velocity, using the tractive effort the tyres
+ *   will take rather than the torque the motors make — gearing for torque you
+ *   cannot use does not raise it, which is exactly right.
+ * - **STRIKE** is the energy a weapon delivers per hit, joules: a spinner's
+ *   stored kinetic energy, or the work an arm does over its swing.
+ * - **ARMOUR** is the impact energy the machine can absorb before its mounts
+ *   fail, kilojoules.
+ *
+ * The weights bring three quantities with very different magnitudes onto one
+ * scale. They are a presentation choice and nothing in the simulation reads
+ * them.
+ */
+export interface Rating {
+  /** Deliverable mechanical power, W. */
+  readonly drive: number;
+  /** Energy per hit, J. */
+  readonly strike: number;
+  /** Impact energy absorbed before failure, kJ. */
+  readonly armour: number;
+  /** The headline. Unitless. */
+  readonly overall: number;
 }
 
 /**
@@ -290,8 +326,29 @@ export function analyseBuild(build: Build): MachineAnalysis {
     }
   }
 
+  // Work per swing: torque through the arc an arm actually travels. A hammer
+  // sweeps about 1.7 rad and a flipper about 1.05, which is why a flipper with
+  // more torque can still do less work in a firing.
+  const armWork = solution.arms.reduce(
+    (most, arm) => Math.max(most, arm.torque * (arm.kind === 'HAMMER' ? 1.7 : 1.05)),
+    0,
+  );
+  const spinnerEnergy = solution.spinners.reduce((most, s) => Math.max(most, s.energy), 0);
+
+  const rating: Rating = {
+    drive: tractiveEffort * (Number.isFinite(topSpeed) ? topSpeed : 0),
+    strike: Math.max(spinnerEnergy, armWork),
+    armour: integrity / 1000,
+    overall: Math.round(
+      tractiveEffort * (Number.isFinite(topSpeed) ? topSpeed : 0) * 1.6 +
+        Math.max(spinnerEnergy, armWork) * 0.9 +
+        (integrity / 1000) * 14,
+    ),
+  };
+
   return {
     solution,
+    rating,
     mass,
     weightClass: cls,
     massMargin,

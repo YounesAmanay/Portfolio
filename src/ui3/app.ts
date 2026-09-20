@@ -220,6 +220,9 @@ class App {
       for (const component of components) {
         const button = el('button', 'part') as HTMLButtonElement;
         button.setAttribute('aria-pressed', String(this.bench?.selectedComponentId === component.id));
+        // The stripe colour is the hue this part is on the model. The
+        // catalogue and the machine then teach each other.
+        button.dataset.cat = component.category;
         button.appendChild(el('div', 'part__name', component.name));
         button.appendChild(el('div', 'part__spec', specLine(component)));
         button.onclick = (): void => {
@@ -358,7 +361,27 @@ class App {
     const body = this.#root.querySelector('#readout-body');
     if (!body) return;
 
-    // The weight class first, because it is the constraint everything else is
+    // The headline first: one number that moves when you change something.
+    const card = el('div', 'rating');
+    const overall = el('div', 'rating__overall');
+    overall.appendChild(el('div', 'rating__label', 'OVERALL'));
+    overall.appendChild(el('div', 'rating__value', report.rating.overall.toLocaleString('en-GB')));
+    card.appendChild(overall);
+
+    const parts = el('div', 'rating__parts');
+    const line = (icon: string, label: string, value: string): void => {
+      const row = el('div', 'rating__row');
+      row.appendChild(el('i', '', icon));
+      row.appendChild(el('span', '', label));
+      row.appendChild(el('b', '', value));
+      parts.appendChild(row);
+    };
+    line('\u26a1', 'DRIVE', `${report.rating.drive.toFixed(0)} W`);
+    line('\u2726', 'STRIKE', `${report.rating.strike.toFixed(0)} J`);
+    line('\u25c6', 'ARMOUR', `${report.rating.armour.toFixed(1)} kJ`);
+    card.appendChild(parts);
+
+    // Then the weight class, because it is the constraint everything else is
     // a trade against. A bar reads "how much is left" at a glance; a number
     // makes you do the subtraction.
     const cls = el('div', 'classbar');
@@ -399,7 +422,7 @@ class App {
     add('Channels', `${report.channelsUsed}/${report.channelsAvailable}`, '');
     add('Cost', report.cost.toFixed(0), 'cr');
 
-    body.replaceChildren(cls, stats);
+    body.replaceChildren(card, cls, stats);
 
     for (const spinner of solution.spinners) {
       const row = el('div', 'weaponline');

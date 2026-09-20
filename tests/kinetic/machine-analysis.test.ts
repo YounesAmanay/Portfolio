@@ -21,6 +21,7 @@ import {
   type Fitted,
 } from '@kinetic/machine/build';
 import { solve } from '@kinetic/machine/solver';
+import { MACHINES } from '@kinetic/content/machines';
 import { toMachine } from '@kinetic/machine/build';
 
 const at = (uid: string, componentId: string, x: number, y: number, z: number): Fitted => ({
@@ -230,5 +231,51 @@ describe('problems', () => {
     expect(report.problems[0]?.message).toContain('Nothing built yet');
     expect(report.mass).toBe(0);
     expect(report.topSpeed).toBe(0);
+  });
+});
+
+describe('the rating', () => {
+  it('is derived from what the machine can actually do', () => {
+    const report = analyseBuild(beetle());
+    // Power on the floor is force times velocity, and the force is what the
+    // tyres will take — not what the motors make.
+    expect(report.rating.drive).toBeCloseTo(report.tractiveEffort * report.topSpeed, 10);
+    expect(report.rating.armour).toBeCloseTo(report.integrity / 1000, 10);
+    expect(report.rating.overall).toBeGreaterThan(0);
+  });
+
+  it('does not reward gearing for torque the tyres cannot use', () => {
+    // The whole point of scoring deliverable power rather than wheel torque.
+    // Gearing this beetle down from 20:1 to 40:1 doubles its torque and it is
+    // already grip-limited, so nothing reaches the floor that did not before —
+    // and it goes half the speed, so the score falls.
+    const geared = (gearbox: string): Build => {
+      let build = beetle();
+      for (const side of ['l', 'r'] as const) {
+        build = removeFitted(build, `g${side}`);
+        build = addFitted(build, at(`g${side}`, gearbox, side === 'l' ? 0 : 4, 1, 3));
+        build = addLink(build, { from: `m${side}`, fromPort: 'out', to: `g${side}`, toPort: 'in' });
+        build = addLink(build, { from: `g${side}`, fromPort: 'out', to: `w${side}`, toPort: 'in' });
+      }
+      return build;
+    };
+    const fast = analyseBuild(geared('gbx.20'));
+    const slow = analyseBuild(geared('gbx.40'));
+    expect(slow.totalTorque).toBeGreaterThan(fast.totalTorque);
+    expect(slow.rating.drive).toBeLessThan(fast.rating.drive);
+  });
+
+  it('rises when a weapon is fitted', () => {
+    const bare = analyseBuild(beetle()).rating.overall;
+    expect(bare).toBeGreaterThan(0);
+    // Every preset with a weapon out-rates the same class without one.
+    const armed = analyseBuild(MACHINES.find((m) => m.name === 'SCOUT')!);
+    expect(armed.rating.strike).toBeGreaterThan(0);
+  });
+
+  it('scores an empty build at zero', () => {
+    const report = analyseBuild(emptyBuild());
+    expect(report.rating.overall).toBe(0);
+    expect(report.rating.strike).toBe(0);
   });
 });

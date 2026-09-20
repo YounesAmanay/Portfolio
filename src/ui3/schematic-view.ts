@@ -22,6 +22,20 @@ const NODE_H = 58;
 const PAD = 22;
 
 /** What each kind of link carries, and therefore what colour it is. */
+/** A hue dark enough to read as 9px text on a white card. */
+function inkFor(colour: string): string {
+  const shade: Record<string, string> = {
+    '#ffb648': '#a06400',
+    '#37d6a0': '#127a55',
+    '#c8a04a': '#8a6a1c',
+    '#9aa6b5': '#5a6879',
+    '#4de2ff': '#0a7d8a',
+    '#5d646d': '#4a5058',
+    '#ff5c6a': '#c02434',
+  };
+  return shade[colour] ?? colour;
+}
+
 const KIND_COLOUR: Record<PortKind, string> = {
   power: '#ffb648',
   signal: '#37d6a0',
@@ -143,19 +157,22 @@ export function renderSchematic(
         width: NODE_W,
         height: NODE_H,
         rx: 8,
-        fill: node.uid === selected ? 'rgba(77,226,255,0.14)' : 'rgba(9,14,21,0.92)',
-        stroke: node.uid === selected ? '#4de2ff' : 'rgba(255,255,255,0.16)',
-        'stroke-width': node.uid === selected ? 2 : 1,
+        fill: node.uid === selected ? '#e7f0ff' : '#f6f9fd',
+        stroke: node.uid === selected ? '#2f6fe4' : '#c3d2e6',
+        'stroke-width': 2,
       }),
     );
     // The role stripe: what this thing is for, readable before the label is.
     group.appendChild(svg('rect', { width: 4, height: NODE_H, rx: 2, fill: accent }));
 
-    const label = svg('text', { x: 14, y: 23, class: 'schematic__label', fill: '#e8eef6' });
+    const label = svg('text', { x: 14, y: 23, class: 'schematic__label', fill: '#16243a' });
     label.textContent = node.label;
     group.appendChild(label);
 
-    const detail = svg('text', { x: 14, y: 41, class: 'schematic__detail', fill: accent });
+    // Darkened against a light card: the role hues are chosen to read on the
+    // model, where they sit against a bright set, and several of them (yellow,
+    // cyan) are invisible as small text on white.
+    const detail = svg('text', { x: 14, y: 41, class: 'schematic__detail', fill: inkFor(accent) });
     detail.textContent = node.detail;
     group.appendChild(detail);
 
