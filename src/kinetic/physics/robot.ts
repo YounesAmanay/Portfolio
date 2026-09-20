@@ -116,6 +116,13 @@ export interface RobotHandle {
 const UP: RAPIER.Vector3 = { x: 0, y: 1, z: 0 };
 
 /**
+ * Contact force below which no event is raised, in newtons. Set well above the
+ * weight of a machine resting on its own wheels, or every frame reports the
+ * floor pushing back and the damage model drowns in noise.
+ */
+const CONTACT_THRESHOLD = 260;
+
+/**
  * Wheel spin axis in chassis space. A pod at yaw 0 spins about X, so the
  * machine's forward direction is +Z — which is the convention the whole
  * builder and camera assume.
@@ -181,10 +188,27 @@ export function spawnRobot(
   const spawnY =
     options.position.y ?? restHeight(design, options.groundY ?? 0, options.dropGap ?? 0.01);
 
+  // Spawn rotation, needed for every child body's world position. Placing a
+  // wheel at its unrotated offset while the chassis carries a yaw leaves the
+  // joint violently out of alignment: it snaps the machine onto its side in
+  // the first step, which is exactly what happened in the arena but never in
+  // a test that spawned facing forward.
+  const spawnRotation: RAPIER.Rotation = {
+    x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2),
+  };
+  const toWorld = (localOffset: RAPIER.Vector3): RAPIER.Vector3 => {
+    const r = rotateVector(localOffset, spawnRotation);
+    return {
+      x: options.position.x + r.x,
+      y: spawnY + r.y,
+      z: options.position.z + r.z,
+    };
+  };
+
   const chassis = world.createRigidBody(
     RAPIER.RigidBodyDesc.dynamic()
       .setTranslation(options.position.x, spawnY, options.position.z)
-      .setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) })
+      .setRotation(spawnRotation)
       .setLinearDamping(0.06)
       .setAngularDamping(0.22)
       .setCanSleep(false),
@@ -236,13 +260,11 @@ export function spawnRobot(
           z: contact.position.z + offset.z,
         };
 
+        const worldPos = toWorld(contactLocal);
         const wheelBody = world.createRigidBody(
           RAPIER.RigidBodyDesc.dynamic()
-            .setTranslation(
-              options.position.x + contactLocal.x,
-              spawnY + contactLocal.y,
-              options.position.z + contactLocal.z,
-            )
+            .setTranslation(worldPos.x, worldPos.y, worldPos.z)
+            .setRotation(spawnRotation)
             .setAngularDamping(0.04)
             .setCanSleep(false),
         );
@@ -257,7 +279,9 @@ export function spawnRobot(
             .setFriction(spec.grip)
             .setRestitution(0.1)
             .setMass(shareOfMass)
-            .setCollisionGroups(groups),
+            .setCollisionGroups(groups)
+            .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+            .setContactForceEventThreshold(CONTACT_THRESHOLD),
           wheelBody,
         );
 
@@ -296,7 +320,9 @@ export function spawnRobot(
           .setMass(part.mass)
           .setFriction(0.5)
           .setRestitution(0.15)
-          .setCollisionGroups(groups),
+          .setCollisionGroups(groups)
+          .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+          .setContactForceEventThreshold(CONTACT_THRESHOLD),
         chassis,
       );
       state.colliderHandle = collider.handle;
@@ -310,13 +336,11 @@ export function spawnRobot(
       // Spinners are their own body so their stored energy is real: a heavy
       // disc at speed carries genuine angular momentum, and the chassis feels
       // the reaction torque when it spins up.
+      const spinPos = toWorld(local);
       const spinBody = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
-          .setTranslation(
-            options.position.x + local.x,
-            spawnY + local.y,
-            options.position.z + local.z,
-          )
+          .setTranslation(spinPos.x, spinPos.y, spinPos.z)
+          .setRotation(spawnRotation)
           .setAngularDamping(0.015)
           .setCanSleep(false),
       );
@@ -327,7 +351,9 @@ export function spawnRobot(
           .setFriction(0.35)
           .setRestitution(0.5)
           .setMass(part.mass)
-          .setCollisionGroups(groups),
+          .setCollisionGroups(groups)
+          .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+          .setContactForceEventThreshold(CONTACT_THRESHOLD),
         spinBody,
       );
       const spinJoint = world.createImpulseJoint(

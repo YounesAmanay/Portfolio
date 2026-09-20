@@ -60,13 +60,13 @@ export class Stage {
     // ACES keeps emissive accents from blowing out to white the moment they
     // overlap, which is exactly what a neon-on-void palette does otherwise.
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.15;
+    this.renderer.toneMappingExposure = 1.25;
     this.renderer.shadowMap.enabled = quality.shadows;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
     this.scene = new THREE.Scene();
     this.scene.background = new THREE.Color('#05070d');
-    this.scene.fog = new THREE.Fog('#05070d', 28, 95);
+    this.scene.fog = new THREE.Fog('#070b13', 34, 120);
 
     this.camera = new THREE.PerspectiveCamera(52, 1, 0.05, 400);
     this.camera.position.set(6, 4, 8);
@@ -74,7 +74,7 @@ export class Stage {
     // ── lighting ──────────────────────────────────────────────────────────
     // A cool sky / warm bounce pair gives metal somewhere to reflect from
     // without an HDRI download.
-    const hemi = new THREE.HemisphereLight('#7fc9ff', '#241c14', 0.55);
+    const hemi = new THREE.HemisphereLight('#8fd2ff', '#2b2218', 0.85);
     this.scene.add(hemi);
 
     this.sun = new THREE.DirectionalLight('#fff4e0', 2.2);

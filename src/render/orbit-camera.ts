@@ -67,6 +67,11 @@ export class OrbitCamera {
     this.#following = object;
   }
 
+  /** Sets how far back the camera sits, independent of what it is watching. */
+  setDistance(distance: number): void {
+    this.#goalDistance = THREE.MathUtils.clamp(distance, this.limits.minDistance, this.limits.maxDistance);
+  }
+
   get isFollowing(): boolean {
     return this.#following !== null;
   }

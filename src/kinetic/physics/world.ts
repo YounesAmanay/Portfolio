@@ -62,8 +62,9 @@ export class PhysicsWorld {
     return this.#elapsed;
   }
 
-  step(): void {
-    this.world.step();
+  /** Steps the world. Pass a queue to collect contact events for damage. */
+  step(events?: RAPIER.EventQueue): void {
+    this.world.step(events);
     this.#elapsed += PHYSICS_DT;
     this.#cullDebris();
   }

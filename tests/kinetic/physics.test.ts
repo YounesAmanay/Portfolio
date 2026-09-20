@@ -201,6 +201,59 @@ describe('energy', () => {
   });
 });
 
+describe('spawn orientation', () => {
+  // Every earlier test spawned facing forward, which is why a bug that only
+  // appears at a non-zero yaw survived: the arena spawns machines on a ring,
+  // all of them rotated, and every one of them fell onto its side.
+  it.each([0, Math.PI / 2, Math.PI, -Math.PI / 2])('stays upright when spawned at yaw %f', (yaw) => {
+    const physics = new PhysicsWorld();
+    physics.addGround(120, { friction: 1.0, restitution: 0.05 });
+    const robot = spawnRobot(physics.world, SCOUT, { position: { x: 0, z: 0 }, yaw });
+
+    for (let i = 0; i < PHYSICS_HZ; i++) {
+      driveRobot(robot, neutralInput());
+      physics.step();
+    }
+    expect(isInverted(robot)).toBe(false);
+
+    const start = robot.chassis.translation();
+    for (let i = 0; i < PHYSICS_HZ * 3; i++) {
+      driveRobot(robot, { ...neutralInput(), drive: 1 });
+      physics.step();
+    }
+    const end = robot.chassis.translation();
+    const travelled = Math.hypot(end.x - start.x, end.z - start.z);
+
+    expect(isInverted(robot)).toBe(false);
+    expect(travelled, `yaw ${yaw} travelled ${travelled.toFixed(2)}m`).toBeGreaterThan(2);
+    physics.dispose();
+  });
+
+  it('drives in the direction it is facing', () => {
+    // Yaw 0 faces +Z; a quarter turn should send it along +X instead.
+    const go = (yaw: number): { x: number; z: number } => {
+      const physics = new PhysicsWorld();
+      physics.addGround(120, { friction: 1.0, restitution: 0.05 });
+      const robot = spawnRobot(physics.world, SCOUT, { position: { x: 0, z: 0 }, yaw });
+      for (let i = 0; i < PHYSICS_HZ / 2; i++) { driveRobot(robot, neutralInput()); physics.step(); }
+      const start = robot.chassis.translation();
+      for (let i = 0; i < PHYSICS_HZ * 3; i++) {
+        driveRobot(robot, { ...neutralInput(), drive: 1 });
+        physics.step();
+      }
+      const end = robot.chassis.translation();
+      physics.dispose();
+      return { x: end.x - start.x, z: end.z - start.z };
+    };
+
+    const forward = go(0);
+    expect(forward.z).toBeGreaterThan(Math.abs(forward.x));
+
+    const turned = go(Math.PI / 2);
+    expect(turned.x).toBeGreaterThan(Math.abs(turned.z));
+  });
+});
+
 describe('determinism', () => {
   it('two identical runs agree exactly', () => {
     const a = run(SCOUT, { drive: 1, steer: 0.3 }, 3);
