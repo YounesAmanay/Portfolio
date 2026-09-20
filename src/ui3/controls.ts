@@ -13,8 +13,26 @@
 import { clamp } from '../kinetic/core/units';
 import { neutralInput, type ControlInput } from '../kinetic/physics/robot';
 
-const RAMP_UP = 5.5;     // units per second toward the commanded value
-const RAMP_DOWN = 7.5;   // and back toward centre, slightly faster
+/**
+ * Ramp rates, in units per second toward the commanded value.
+ *
+ * Steering is deliberately much quicker than the throttle. A throttle wants
+ * some weight to it, but a steering input that takes 180 ms to reach full lock
+ * feels like the machine is arguing with you — which is what 5.5 did.
+ */
+const DRIVE_UP = 7;
+const DRIVE_DOWN = 10;
+const STEER_UP = 14;
+const STEER_DOWN = 18;
+const TRIGGER_RATE = 8;
+
+/**
+ * Radius of stick travel treated as centre.
+ *
+ * Capacitive touch reports a few percent of drift from a resting thumb, and
+ * without a dead zone that drift is a permanent slow turn.
+ */
+const DEADZONE = 0.15;
 
 export class Controls {
   readonly input: ControlInput = neutralInput();
@@ -52,9 +70,18 @@ export class Controls {
     });
   }
 
+  /**
+   * Stick position, normalised to [-1, 1] per axis.
+   *
+   * The dead zone is applied radially rather than per axis, so the corners of
+   * the square are not treated differently from the edges, and the remaining
+   * travel is rescaled from zero — otherwise the machine jumps to 15% throttle
+   * the instant the thumb leaves centre.
+   */
   setStick(x: number, y: number): void {
-    this.#stickX = clamp(x, -1, 1);
-    this.#stickY = clamp(y, -1, 1);
+    const shaped = shapeStick(x, y);
+    this.#stickX = shaped.x;
+    this.#stickY = shaped.y;
   }
 
   setWeapon(active: boolean): void {
@@ -82,10 +109,10 @@ export class Controls {
     const targetWeapon = this.#touchWeapon || this.#keys.has('Space') ? 1 : 0;
     const targetLift = this.#touchLift || this.#keys.has('ShiftLeft') || this.#keys.has('ShiftRight') ? 1 : 0;
 
-    this.input.drive = approach(this.input.drive, targetDrive, dt);
-    this.input.steer = approach(this.input.steer, targetSteer, dt);
-    this.input.weapon = approach(this.input.weapon, targetWeapon, dt);
-    this.input.lift = approach(this.input.lift, targetLift, dt);
+    this.input.drive = approach(this.input.drive, targetDrive, dt, DRIVE_UP, DRIVE_DOWN);
+    this.input.steer = approach(this.input.steer, targetSteer, dt, STEER_UP, STEER_DOWN);
+    this.input.weapon = approach(this.input.weapon, targetWeapon, dt, TRIGGER_RATE, TRIGGER_RATE);
+    this.input.lift = approach(this.input.lift, targetLift, dt, TRIGGER_RATE, TRIGGER_RATE);
     return this.input;
   }
 
@@ -110,8 +137,29 @@ const DRIVING_KEYS = new Set([
   'Space', 'ShiftLeft', 'ShiftRight',
 ]);
 
-function approach(current: number, target: number, dt: number): number {
-  const rate = Math.abs(target) > Math.abs(current) ? RAMP_UP : RAMP_DOWN;
+/**
+ * Dead zone and response curve for a thumb stick.
+ *
+ * The dead zone is radial rather than per axis, so the corners of the square
+ * are not treated differently from the edges, and the remaining travel is
+ * rescaled from zero — without that the machine jumps straight to 15% throttle
+ * the instant a thumb leaves centre. The curve then spends most of the travel
+ * on the slow half, which is where placing a machine accurately happens.
+ *
+ * Pure, and exported for that reason: it is the part of the control feel worth
+ * pinning down in a test.
+ */
+export function shapeStick(x: number, y: number): { x: number; y: number } {
+  const magnitude = Math.hypot(x, y);
+  if (magnitude <= DEADZONE) return { x: 0, y: 0 };
+
+  const live = Math.min(1, (magnitude - DEADZONE) / (1 - DEADZONE));
+  const scale = (live * live * 0.6 + live * 0.4) / magnitude;
+  return { x: clamp(x * scale, -1, 1), y: clamp(y * scale, -1, 1) };
+}
+
+export function approach(current: number, target: number, dt: number, up: number, down: number): number {
+  const rate = Math.abs(target) > Math.abs(current) ? up : down;
   const step = rate * dt;
   if (Math.abs(target - current) <= step) return target;
   return current + Math.sign(target - current) * step;
@@ -145,6 +193,8 @@ export function createTouchStick(onMove: (x: number, y: number) => void): HTMLEl
     const x = dx * scale;
     const y = dy * scale;
     knob.style.transform = `translate(${x}px, ${y}px)`;
+    // Raw travel: the dead zone and response curve belong to Controls, so the
+    // knob keeps tracking the thumb exactly even inside the dead zone.
     onMove(x / radius, y / radius);
   };
 

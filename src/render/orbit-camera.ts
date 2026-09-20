@@ -41,6 +41,13 @@ const DEFAULT_LIMITS: OrbitLimits = {
  */
 const FRAME_MARGIN = 1.35;
 
+/** How hard the camera swings back behind the machine, per second. */
+const ALIGN_EASE = 2.6;
+/** Ceiling on that swing, rad/s, so a spin on the spot cannot whip the view. */
+const ALIGN_RATE = 2.2;
+/** Seconds the player keeps manual control after dragging to look around. */
+const ALIGN_HOLD = 2.5;
+
 export class OrbitCamera {
   /** Where the camera looks. Follow mode eases this toward a moving object. */
   readonly target = new THREE.Vector3(0, 0.5, 0);
@@ -55,6 +62,9 @@ export class OrbitCamera {
   readonly #goalTarget = new THREE.Vector3(0, 0.5, 0);
 
   #following: THREE.Object3D | null = null;
+  #headingSource: (() => number) | null = null;
+  /** Seconds of manual control remaining before auto-alignment resumes. */
+  #manualHold = 0;
   #autoSpin = 0;
   #dragging: 'orbit' | 'pan' | null = null;
   #lastPointer = new THREE.Vector2();
@@ -105,6 +115,23 @@ export class OrbitCamera {
     );
   }
 
+  /**
+   * Keeps the camera behind a heading, in radians, as a compass bearing on the
+   * ground plane (atan2(x, z), the same convention the machines use).
+   *
+   * Without this the camera followed position only, so a machine rotated freely
+   * underneath a fixed view. Measured while driving: the camera bearing sat at
+   * -152 degrees for an entire run while the machine's heading swept through
+   * 180, -140, -70, 3 and 73 — a divergence peaking at 155 degrees, at which
+   * point pressing forward drove the machine almost straight at the viewer.
+   * Tank controls under a free camera are unusable, and that is what they were.
+   *
+   * Pass null to stop aligning.
+   */
+  followHeading(source: (() => number) | null): void {
+    this.#headingSource = source;
+  }
+
   setAngles(azimuthDeg: number, polarDeg: number): void {
     this.#goalAzimuth = azimuthDeg * DEG;
     this.#goalPolar = THREE.MathUtils.clamp(polarDeg * DEG, this.limits.minPolar, this.limits.maxPolar);
@@ -117,6 +144,23 @@ export class OrbitCamera {
     }
     if (this.#autoSpin !== 0 && !this.#dragging) {
       this.#goalAzimuth += this.#autoSpin * dt;
+    }
+
+    // Swing round behind the machine, unless the player is looking around.
+    if (this.#manualHold > 0) this.#manualHold = Math.max(0, this.#manualHold - dt);
+    if (this.#headingSource !== null && this.#manualHold === 0 && this.#dragging === null) {
+      // The camera sits at `azimuth` from the target, so to look *along* the
+      // heading it has to stand on the opposite bearing.
+      const desired = this.#headingSource() + Math.PI;
+      const diff = Math.atan2(
+        Math.sin(desired - this.#goalAzimuth),
+        Math.cos(desired - this.#goalAzimuth),
+      );
+      // Eased, then rate-limited. The limit is what stops a machine spinning
+      // on the spot from whipping the camera round with it: the view lags,
+      // catches up, and stays readable.
+      const eased = diff * (1 - Math.exp(-ALIGN_EASE * dt));
+      this.#goalAzimuth += THREE.MathUtils.clamp(eased, -ALIGN_RATE * dt, ALIGN_RATE * dt);
     }
 
     // Frame-rate independent damping: the 1 - e^(-k·dt) form keeps the feel
@@ -177,6 +221,9 @@ export class OrbitCamera {
       this.#lastPointer.set(event.clientX, event.clientY);
 
       if (this.#dragging === 'orbit') {
+        // Looking around suspends auto-alignment rather than cancelling it, so
+        // the view drifts back behind the machine once the player lets go.
+        this.#manualHold = ALIGN_HOLD;
         this.#goalAzimuth -= dx * 0.006;
         this.#goalPolar = THREE.MathUtils.clamp(
           this.#goalPolar - dy * 0.006,
@@ -220,9 +267,14 @@ export class OrbitCamera {
     );
   }
 
-  /** Panning breaks follow mode — the player has taken manual control. */
+  /**
+   * Panning moves the look-at point, and does nothing while following.
+   *
+   * It used to drop follow mode entirely, which meant one stray two-finger
+   * drag during a match left the camera stranded and the machine gone.
+   */
   #pan(dx: number, dy: number): void {
-    this.#following = null;
+    if (this.#following !== null) return;
     const scale = this.#distance * 0.0016;
     const right = new THREE.Vector3(Math.cos(this.#azimuth), 0, -Math.sin(this.#azimuth));
     const forward = new THREE.Vector3(Math.sin(this.#azimuth), 0, Math.cos(this.#azimuth));

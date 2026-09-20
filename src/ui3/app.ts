@@ -62,6 +62,7 @@ class App {
   // ── modes ────────────────────────────────────────────────────────────────
 
   enterWorkshop(): void {
+    this.camera.followHeading(null);
     this.session?.dispose();
     this.session = null;
     this.mode = 'WORKSHOP';
@@ -115,6 +116,9 @@ class App {
     // staring at bare floor while your machine sat off-screen — during exactly
     // the moment you want to look at what you built.
     this.camera.follow(player);
+    // And behind its nose, not just above its position. Forward on the stick
+    // has to mean forward on the screen or tank controls are unusable.
+    this.camera.followHeading(() => headingOf(this.session));
     this.camera.frame(
       player?.getWorldPosition(new THREE.Vector3()) ?? new THREE.Vector3(0, 0.26, 0),
       radius * 1.25,
@@ -437,6 +441,23 @@ class App {
 // ─────────────────────────────────────────────────────────────────────────────
 // Small DOM helpers
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The player machine's heading as a ground-plane bearing, radians.
+ *
+ * Taken straight from the chassis rotation rather than from its velocity: a
+ * combat robot that reverses away from a spinner is still facing forward, and
+ * a velocity-aligned camera would spin to look at its own back.
+ */
+function headingOf(session: ArenaSession | null): number {
+  const chassis = session?.player.chassis;
+  if (!chassis) return 0;
+  const q = chassis.rotation();
+  // The machine's +Z axis, rotated into the world and flattened.
+  const x = 2 * (q.x * q.z + q.w * q.y);
+  const z = 1 - 2 * (q.x * q.x + q.y * q.y);
+  return Math.atan2(x, z);
+}
 
 /** Rough bounding radius of a design, in metres. Used for camera framing. */
 function machineRadius(design: Design): number {
