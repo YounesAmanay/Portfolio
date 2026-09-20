@@ -10,6 +10,7 @@
 
 import * as THREE from 'three';
 import type { PartDef } from '../kinetic/parts/types';
+import { disposeMaterials, finishFor, finishMaterial } from './materials';
 
 const geometryCache = new Map<string, THREE.BufferGeometry>();
 const materialCache = new Map<string, THREE.Material>();
@@ -23,40 +24,51 @@ function cachedGeometry(key: string, build: () => THREE.BufferGeometry): THREE.B
   return geometry;
 }
 
+/**
+ * The material for a part.
+ *
+ * Solid parts come from the finish library, which owns the surface maps and
+ * the physical constants. The ghost is deliberately untextured: it is a
+ * placement preview, and panel lines on a translucent overlay read as dirt.
+ */
 export function partMaterial(part: PartDef, opts: { ghost?: boolean } = {}): THREE.Material {
-  const key = `${part.id}|${opts.ghost ? 'ghost' : 'solid'}`;
-  let material = materialCache.get(key);
-  if (material) return material;
-
-  if (opts.ghost) {
-    material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(part.visual.colour),
-      transparent: true,
-      opacity: 0.42,
-      depthWrite: false,
-      emissive: new THREE.Color(part.visual.emissive ?? part.visual.colour),
-      emissiveIntensity: 0.4,
-      metalness: 0.2,
-      roughness: 0.5,
-    });
-  } else {
-    material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(part.visual.colour),
-      metalness: part.visual.metalness,
-      roughness: part.visual.roughness,
-      emissive: part.visual.emissive ? new THREE.Color(part.visual.emissive) : new THREE.Color('#000000'),
-      emissiveIntensity: part.visual.emissive ? 0.55 : 0,
-    });
+  if (!opts.ghost) {
+    // No emissive on the body. `visual.emissive` is an *accent* colour, and
+    // applying it to the whole part made every tyre glow cyan instead of being
+    // black rubber — a part lit from within cannot read as a material at all.
+    // The accent geometry below (hubs, stripes) is what carries it.
+    return finishMaterial(finishFor(part), { tint: part.visual.colour });
   }
+
+  const key = `${part.id}|ghost`;
+  const cached = materialCache.get(key);
+  if (cached) return cached;
+
+  const material = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(part.visual.colour),
+    transparent: true,
+    opacity: 0.42,
+    depthWrite: false,
+    emissive: new THREE.Color(part.visual.emissive ?? part.visual.colour),
+    emissiveIntensity: 0.4,
+    metalness: 0.2,
+    roughness: 0.5,
+  });
   materialCache.set(key, material);
   return material;
 }
 
-const ACCENT = new THREE.MeshStandardMaterial({
-  color: '#0b0e14',
-  metalness: 0.7,
-  roughness: 0.45,
-});
+/**
+ * Dark machined detail: hubs, brackets, anything that is not the part itself.
+ *
+ * Built on first use rather than at module load. Generating a material draws
+ * its texture maps on a canvas, so doing it at import time makes this module
+ * impossible to import anywhere without a DOM — which broke the workshop's
+ * raycast tests, none of which render anything.
+ */
+function accentMaterial(): THREE.Material {
+  return finishMaterial('steel', { tint: '#4a5260' });
+}
 
 export interface MeshSize {
   readonly x: number;
@@ -83,7 +95,7 @@ export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boo
 
       const tyre = new THREE.Mesh(
         cachedGeometry(`tyre:${radius}:${width}`, () => {
-          const g = new THREE.CylinderGeometry(radius, radius, width, 24, 1);
+          const g = new THREE.CylinderGeometry(radius, radius, width, 32, 1);
           g.rotateZ(Math.PI / 2);
           return g;
         }),
@@ -98,15 +110,13 @@ export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boo
           g.rotateZ(Math.PI / 2);
           return g;
         }),
-        part.drive ? partMaterial(part, opts) : ACCENT,
+        part.drive ? partMaterial(part, opts) : accentMaterial(),
       );
       if (part.drive && part.visual.emissive) {
-        hub.material = new THREE.MeshStandardMaterial({
-          color: new THREE.Color(part.visual.emissive),
-          emissive: new THREE.Color(part.visual.emissive),
-          emissiveIntensity: 1.4,
-          metalness: 0.3,
-          roughness: 0.3,
+        hub.material = finishMaterial('alloy', {
+          tint: part.visual.emissive,
+          emissive: part.visual.emissive,
+          emissiveIntensity: 1.1,
         });
       }
       group.add(hub);
@@ -215,11 +225,12 @@ export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boo
           cachedGeometry(`stripe:${size.x}:${size.z}`, () =>
             new THREE.BoxGeometry(size.x * 0.7, size.y * 0.08, size.z * 0.14),
           ),
+          // Deliberately over 1.0 so it survives tone mapping as a light source
+          // and gives the bloom pass something real to pick up.
           new THREE.MeshStandardMaterial({
             color: new THREE.Color(part.visual.emissive),
             emissive: new THREE.Color(part.visual.emissive),
-            emissiveIntensity: 1.6,
-            toneMapped: false,
+            emissiveIntensity: 2.4,
           }),
         );
         stripe.position.y = size.y / 2 + 0.001;
@@ -243,4 +254,5 @@ export function disposeCaches(): void {
   for (const material of materialCache.values()) material.dispose();
   geometryCache.clear();
   materialCache.clear();
+  disposeMaterials();
 }

@@ -101,12 +101,31 @@ export interface ControllerSpec {
 }
 
 /** How the part is drawn. Geometry is procedural — no asset pipeline. */
+/**
+ * What a component is made of.
+ *
+ * The finish owns the surface entirely — its maps, its metalness and its
+ * roughness — so those are not repeated per part. A part says what it is made
+ * of and what colour it is painted; how aluminium behaves under light is a
+ * property of aluminium, not of this particular bracket.
+ */
+export type PartFinish =
+  | 'steel'
+  | 'alloy'
+  | 'armour'
+  | 'carbon'
+  | 'rubber'
+  | 'cell'
+  | 'polymer'
+  | 'copper'
+  | 'hardened';
+
 export interface VisualSpec {
   readonly shape: 'box' | 'cylinder' | 'wheel' | 'disc' | 'rotor' | 'dome' | 'blade';
+  /** Tints the finish's albedo. */
   readonly colour: string;
-  /** 0 = matte, 1 = mirror. */
-  readonly metalness: number;
-  readonly roughness: number;
+  /** Defaults from the part's category and fittings when omitted. */
+  readonly finish?: PartFinish;
   /** Emissive accent, for powered parts. */
   readonly emissive?: string;
 }
