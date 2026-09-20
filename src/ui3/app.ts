@@ -102,13 +102,23 @@ class App {
     });
 
     this.camera.setAutoSpin(0);
-    // Chase distance follows the machine's own size: a 40 cm scout and a
-    // 1.2 m siege tank need very different framing to read at all.
-    // Frame the machine itself, not a generous sphere around it. The old
-    // 0.9 m floor meant a 40 cm scout was framed as if it were 1.8 m across,
-    // which on a portrait phone left it a speck in the middle of the screen.
+
+    // Chase distance follows the machine's own size: a 40 cm scout and a 1.2 m
+    // siege tank need very different framing to read at all. Frame the machine
+    // itself, not a generous sphere around it — the old 0.9 m floor framed a
+    // scout as though it were nearly two metres across.
     const radius = Math.max(0.26, machineRadius(this.design));
-    this.camera.frame(new THREE.Vector3(0, 0.26, 0), radius * 1.25);
+    const player = this.session.views[0]?.focusTarget ?? null;
+
+    // Lock on before the countdown, not after it. Machines spawn on a ring
+    // several metres out, so framing the arena centre meant three seconds of
+    // staring at bare floor while your machine sat off-screen — during exactly
+    // the moment you want to look at what you built.
+    this.camera.follow(player);
+    this.camera.frame(
+      player?.getWorldPosition(new THREE.Vector3()) ?? new THREE.Vector3(0, 0.26, 0),
+      radius * 1.25,
+    );
     this.camera.setAngles(28, 58);
     this.#renderChrome();
   }
@@ -124,11 +134,9 @@ class App {
       const input = this.controls.update(dt);
       this.session.update(dt, input);
 
-      // Follow the machine once it is actually moving; before that, let the
-      // player look around the arena freely.
-      if (this.session.match.status === 'RUNNING' && !this.camera.isFollowing) {
-        this.camera.follow(this.session.views[0]?.focusTarget ?? null);
-      }
+      // Following is established on entry, and panning deliberately breaks it.
+      // Re-acquiring here would have overridden a player who had just taken
+      // manual control, so the camera stays wherever they put it.
       this.#updateHud();
     }
 
