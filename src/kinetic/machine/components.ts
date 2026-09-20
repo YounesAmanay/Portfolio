@@ -244,6 +244,15 @@ export interface ComponentVisual {
   readonly colour: string;
   readonly finish?: ComponentFinish;
   readonly emissive?: string;
+  /**
+   * How much light passes through it, 0..1, where 1 is opaque.
+   *
+   * Only a few things need it, and they are the ones where being see-through
+   * is the material's whole character: polycarbonate armour is chosen because
+   * you can watch the machine work through it, and drawn as a solid slab it
+   * reads as a painted box bolted over the interesting part.
+   */
+  readonly opacity?: number;
 }
 
 export interface ComponentDef {

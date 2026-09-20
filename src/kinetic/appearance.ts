@@ -51,6 +51,16 @@ export interface MeshPart {
   /** A saw carries more teeth than a disc. */
   readonly toothy?: boolean;
   /**
+   * Striking radius of a spinner, metres.
+   *
+   * Geometry follows the physics, as everywhere else here: a disc is drawn at
+   * the reach the solver swings it through, not at whatever fills its lattice
+   * box. A weapon that looks bigger than it hits is the builder lying.
+   */
+  readonly reach?: number;
+  /** How opaque this is, 0..1. Absent means solid. */
+  readonly opacity?: number;
+  /**
    * Whether this housing has something live inside it.
    *
    * Powered housings get louvres and an indicator; dumb structure does not. A
@@ -124,5 +134,7 @@ export function meshPartOfComponent(component: ComponentDef, driven = false): Me
       ? { wheel: { radius: component.wheel.diameter / 2, width: component.wheel.width, driven } }
       : {}),
     ...(component.pack || component.esc || component.receiver ? { powered: true } : {}),
+    ...(component.spinner ? { reach: component.spinner.reach } : {}),
+    ...(component.visual.opacity !== undefined ? { opacity: component.visual.opacity } : {}),
   };
 }

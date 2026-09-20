@@ -93,8 +93,23 @@ button { font: inherit; color: inherit; }
 }
 .panel__body { padding: 10px; overflow-y: auto; flex: 1; min-height: 0; }
 
-.panel--library { left: 12px; top: 58px; bottom: 76px; width: 268px; }
-.panel--readout { right: 12px; top: 58px; width: 268px; max-height: calc(100% - 140px); }
+.panel--library { left: 12px; top: 58px; bottom: 76px; width: 260px; }
+.panel--readout { right: 12px; top: 58px; width: 274px; bottom: 76px; }
+/*
+ * The circuit runs along the bottom, between the two columns, because a chain
+ * reads left to right and a 274px column cannot show one — squeezed into the
+ * side it clipped every node to "20 A Sp…", which is worse than not drawing it.
+ *
+ * It is also where a bench actually puts it: the model in front of you, the
+ * wiring diagram laid out below.
+ */
+.panel--schematic {
+  left: 284px; right: 298px; bottom: 12px; height: 208px;
+}
+/* With the diagram along the bottom, the dock and the hint move out of its
+   way rather than sitting on top of it. */
+.panel--schematic ~ .dock { bottom: 232px; }
+.panel--schematic ~ .hint { bottom: 316px; }
 
 /* ── part library ────────────────────────────────────────────────────────── */
 
@@ -302,8 +317,132 @@ option { background: var(--panel-solid); }
 
 /* ── responsive ──────────────────────────────────────────── */
 
+
+/* ── weight class ────────────────────────────────────────────────────────── */
+
 /*
- * Below the breakpoint the two side columns become bottom sheets, opened one
+ * The constraint everything else is traded against, so it goes first and it is
+ * a bar rather than a number: "how much is left" should not need subtraction.
+ */
+.classbar { margin-bottom: 8px; }
+.classbar__head {
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.06em;
+  color: var(--ink-dim); margin-bottom: 5px;
+}
+.classbar__track {
+  height: 5px; border-radius: 3px; overflow: hidden;
+  background: rgba(255,255,255,0.07);
+}
+.classbar__fill {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, var(--cyan), #7de9ff);
+  box-shadow: 0 0 12px rgba(77,226,255,0.5);
+  transition: width .35s var(--ease), background .2s;
+}
+.classbar__fill.is-over {
+  background: linear-gradient(90deg, var(--red), #ff8d97);
+  box-shadow: 0 0 12px rgba(255,92,106,0.55);
+}
+
+/* ── weapons ─────────────────────────────────────────────────────────────── */
+
+.weaponline {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+  margin-top: 6px; padding: 6px 9px; border-radius: 8px;
+  background: rgba(217,139,255,0.07); border: 1px solid rgba(217,139,255,0.2);
+}
+.weaponline__name { font-family: var(--font-mono); font-size: 10px; color: var(--magenta); }
+.weaponline__spec { font-family: var(--font-mono); font-size: 9px; color: var(--ink-dim); text-align: right; }
+
+/* ── the circuit ─────────────────────────────────────────────────────────── */
+
+.schematic__scroll { overflow: auto; max-width: 100%; }
+.schematic { display: block; }
+.schematic__empty {
+  margin: 0; font-size: 11px; line-height: 1.6; color: var(--ink-faint);
+}
+.schematic__node { cursor: pointer; }
+.schematic__node rect { transition: stroke .15s, fill .15s; }
+.schematic__node:hover rect:first-child { stroke: var(--line-strong); }
+.schematic__label {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+}
+.schematic__detail { font-family: var(--font-mono); font-size: 9px; opacity: 0.9; }
+/* A faulted node pulses rather than merely reddening: on a diagram of twenty
+   boxes a static colour change is easy to look straight past. */
+.schematic__node.is-faulted rect:first-child {
+  stroke: var(--red); stroke-width: 1.5;
+  animation: fault-pulse 1.6s ease-in-out infinite;
+}
+@keyframes fault-pulse {
+  0%, 100% { stroke-opacity: 1; }
+  50% { stroke-opacity: 0.35; }
+}
+.wire { transition: stroke-opacity .15s; }
+
+.schematic__legend {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px;
+  font-family: var(--font-mono); font-size: 8px; letter-spacing: 0.1em;
+  color: var(--ink-faint); text-transform: uppercase;
+}
+.schematic__key { display: inline-flex; align-items: center; gap: 4px; }
+.schematic__key i { width: 9px; height: 2px; border-radius: 1px; }
+
+/* ── inspector ───────────────────────────────────────────────────────────── */
+
+.inspector {
+  margin-top: 10px; padding: 9px; border-radius: 9px;
+  background: rgba(77,226,255,0.06); border: 1px solid rgba(77,226,255,0.22);
+}
+.inspector__name { font-family: var(--font-mono); font-size: 11px; font-weight: 600; color: var(--cyan); }
+.inspector__blurb { margin: 4px 0 8px; font-size: 11px; line-height: 1.5; color: var(--ink-dim); }
+.inspector__none { font-family: var(--font-mono); font-size: 9px; color: var(--ink-faint); }
+.inspector__link {
+  display: flex; align-items: center; gap: 7px; padding: 3px 0;
+  font-family: var(--font-mono); font-size: 10px;
+}
+.inspector__dir { color: var(--cyan); width: 10px; }
+.inspector__peer { flex: 1; color: var(--ink-dim); }
+.inspector__cut {
+  appearance: none; background: none; border: 0; cursor: pointer;
+  font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.1em;
+  color: var(--ink-faint); padding: 2px 4px; border-radius: 4px;
+}
+.inspector__cut:hover { color: var(--red); background: rgba(255,92,106,0.12); }
+.inspector__actions { display: flex; gap: 6px; margin-top: 8px; }
+.inspector__actions .btn { flex: 1; justify-content: center; }
+
+/* ── build / wire ────────────────────────────────────────────────────────── */
+
+/*
+ * Two gestures, one control. They are the whole interaction, so they get a
+ * segmented switch rather than two buttons lost in the dock row.
+ */
+.toolset {
+  display: inline-flex; padding: 2px; gap: 2px;
+  background: rgba(255,255,255,0.05); border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.tool {
+  appearance: none; cursor: pointer; background: none; border: 0;
+  padding: 7px 13px; border-radius: 7px;
+  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.14em;
+  color: var(--ink-faint); transition: color .15s, background .15s;
+}
+.tool:hover { color: var(--ink); }
+.tool[aria-pressed='true'] {
+  color: var(--void); background: var(--cyan);
+  box-shadow: 0 0 16px rgba(77,226,255,0.4);
+}
+
+/* A problem that names a component is a link to it, and says so. */
+.problem--locatable { cursor: pointer; width: 100%; text-align: left; }
+.problem--locatable:hover { filter: brightness(1.25); }
+.problem { appearance: none; font: inherit; }
+.problem:disabled { cursor: default; }
+
+/*
+ * Below the breakpoint the side columns become bottom sheets, opened one
  * at a time from the dock. The dock itself stops wrapping and becomes a single
  * scrolling row, because five stacked rows of controls ate a fifth of the
  * screen and buried the thing you are building.
@@ -312,7 +451,7 @@ option { background: var(--panel-solid); }
 .sheet-toggle, .sheet-close { display: none; }
 
 @media (max-width: 900px) {
-  .panel--library, .panel--readout {
+  .panel--library, .panel--readout, .panel--schematic {
     left: 6px; right: 6px; width: auto; top: auto; bottom: 6px;
     max-height: min(56vh, 460px);
     /* Parked below the fold; `is-open` slides it up. The extra 24px clears
@@ -378,7 +517,7 @@ option { background: var(--panel-solid); }
 
 /* Landscape phones are short, not narrow: reclaim the vertical budget. */
 @media (max-width: 900px) and (max-height: 480px) {
-  .panel--library, .panel--readout { max-height: 78vh; }
+  .panel--library, .panel--readout, .panel--schematic { max-height: 78vh; }
   .pad { bottom: calc(10px + env(safe-area-inset-bottom)); }
   .pad--drive { flex-direction: row; align-items: flex-end; }
   .touch-btn--steer { width: 66px; height: 66px; }

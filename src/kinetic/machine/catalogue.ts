@@ -105,7 +105,7 @@ const ARMOUR: ComponentDef[] = [
     cost: 35,
     blurb: 'Slippery polyethylene along the flank. A spinner skates off it instead of biting.',
     lesson: 'Armour that deflects beats armour that resists. Energy you never absorb costs nothing to survive.',
-    visual: { shape: 'box', colour: '#d8dde3', finish: 'polymer' },
+    visual: { shape: 'box', colour: '#d8dde3', finish: 'polymer', opacity: 0.55 },
     ports: [],
   },
   {
@@ -118,7 +118,7 @@ const ARMOUR: ComponentDef[] = [
     cost: 60,
     blurb: 'Springy 8 mm polycarbonate. Flexes instead of shattering, and weighs almost nothing.',
     lesson: '2 900 J per kilogram, the best ratio in the shop, and it still will not stop a serious spinner.',
-    visual: { shape: 'box', colour: '#8fd7ff', finish: 'polymer' },
+    visual: { shape: 'box', colour: '#8fd7ff', finish: 'polymer', opacity: 0.38 },
     ports: [],
   },
   {

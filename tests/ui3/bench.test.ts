@@ -11,7 +11,7 @@
 
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { firstBuildableHit } from '../../src/ui3/workshop';
+import { firstBuildableHit } from '../../src/ui3/bench';
 
 /** Minimal stand-in for a Three intersection; only the read fields matter. */
 function hit(object: THREE.Object3D, distance: number, withFace: boolean): THREE.Intersection {

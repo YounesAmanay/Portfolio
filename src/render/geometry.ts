@@ -424,3 +424,194 @@ export function mergeGeometries(geometries: readonly THREE.BufferGeometry[]): TH
   merged.computeBoundingSphere();
   return merged;
 }
+
+// ── the component model's shapes ───────────────────────────────────────────
+//
+// Motors, gearboxes, engines, tanks and boards were all falling through to a
+// chamfered box, which on a machine assembled from components is most of what
+// you see. A drivetrain rendered as five grey blocks is not a drivetrain.
+
+/**
+ * A motor: a can with an end bell, a stator gap and a shaft.
+ *
+ * Drawn as an outrunner because that is what most of the catalogue is — the
+ * visible gap between the spinning can and the fixed base is the single detail
+ * that makes one read as a motor rather than a tin.
+ */
+export function motorParts(radius: number, length: number): {
+  can: THREE.BufferGeometry;
+  bell: THREE.BufferGeometry;
+  shaft: THREE.BufferGeometry;
+} {
+  const canLength = length * 0.62;
+  const can = new THREE.CylinderGeometry(radius, radius, canLength, 22);
+  can.rotateZ(Math.PI / 2);
+
+  const parts: THREE.BufferGeometry[] = [];
+
+  // The base the can turns on, a step narrower so the gap catches a shadow.
+  const base = new THREE.CylinderGeometry(radius * 0.82, radius * 0.86, length * 0.3, 22);
+  base.rotateZ(Math.PI / 2);
+  base.translate(-length * 0.44, 0, 0);
+  parts.push(base);
+
+  // Winding slots around the can. Eight is enough to read as a stator at this
+  // size and cheap enough to leave in every motor on the machine.
+  for (let i = 0; i < 8; i += 1) {
+    const slot = new THREE.BoxGeometry(canLength * 0.72, radius * 0.1, radius * 0.16);
+    slot.translate(0, 0, radius * 0.94);
+    slot.rotateX((i / 8) * Math.PI * 2);
+    parts.push(slot);
+  }
+
+  const shaft = new THREE.CylinderGeometry(radius * 0.16, radius * 0.16, length * 1.04, 12);
+  shaft.rotateZ(Math.PI / 2);
+
+  return { can, bell: mergeGeometries(parts), shaft };
+}
+
+/**
+ * A gearbox: a stepped housing with an output boss and a bolt circle.
+ *
+ * The step is the whole point — a planetary box is visibly a stack of stages,
+ * and a plain cylinder reads as a spacer.
+ */
+export function gearboxParts(radius: number, length: number): {
+  housing: THREE.BufferGeometry;
+  detail: THREE.BufferGeometry;
+} {
+  const housing = new THREE.CylinderGeometry(radius, radius * 0.9, length * 0.72, 20);
+  housing.rotateZ(Math.PI / 2);
+
+  const parts: THREE.BufferGeometry[] = [];
+
+  // Output boss and the shaft coming out of it.
+  const boss = new THREE.CylinderGeometry(radius * 0.52, radius * 0.52, length * 0.22, 18);
+  boss.rotateZ(Math.PI / 2);
+  boss.translate(length * 0.44, 0, 0);
+  parts.push(boss);
+
+  const shaft = new THREE.CylinderGeometry(radius * 0.17, radius * 0.17, length * 1.1, 12);
+  shaft.rotateZ(Math.PI / 2);
+  parts.push(shaft);
+
+  // Mounting flange with bolts, at the input end.
+  const flange = new THREE.CylinderGeometry(radius * 1.08, radius * 1.08, length * 0.1, 20);
+  flange.rotateZ(Math.PI / 2);
+  flange.translate(-length * 0.34, 0, 0);
+  parts.push(flange);
+
+  for (let i = 0; i < 6; i += 1) {
+    const bolt = new THREE.CylinderGeometry(radius * 0.08, radius * 0.08, length * 0.16, 6);
+    bolt.rotateZ(Math.PI / 2);
+    bolt.translate(-length * 0.34, radius * 0.88, 0);
+    bolt.rotateX((i / 6) * Math.PI * 2);
+    parts.push(bolt);
+  }
+
+  return { housing, detail: mergeGeometries(parts) };
+}
+
+/**
+ * An engine: a finned barrel on a crankcase, with a head and an exhaust stub.
+ *
+ * The fins are what sell it. An air-cooled two-stroke is mostly cooling area,
+ * and nothing else in the catalogue has that silhouette.
+ */
+export function engineParts(size: { x: number; y: number; z: number }): {
+  block: THREE.BufferGeometry;
+  fins: THREE.BufferGeometry;
+  detail: THREE.BufferGeometry;
+} {
+  const barrel = Math.min(size.x, size.z) * 0.32;
+  const block = chamferedBox(size.x * 0.82, size.y * 0.42, size.z * 0.86);
+  block.translate(0, -size.y * 0.28, 0);
+
+  const fins: THREE.BufferGeometry[] = [];
+  const count = 7;
+  for (let i = 0; i < count; i += 1) {
+    const fin = new THREE.CylinderGeometry(barrel * 1.5, barrel * 1.5, size.y * 0.028, 18);
+    fin.translate(0, size.y * (-0.02 + (i / count) * 0.44), 0);
+    fins.push(fin);
+  }
+
+  const parts: THREE.BufferGeometry[] = [];
+  const core = new THREE.CylinderGeometry(barrel, barrel, size.y * 0.5, 18);
+  core.translate(0, size.y * 0.2, 0);
+  parts.push(core);
+
+  const headTop = new THREE.CylinderGeometry(barrel * 1.2, barrel * 1.4, size.y * 0.1, 18);
+  headTop.translate(0, size.y * 0.46, 0);
+  parts.push(headTop);
+
+  // Exhaust stub out of one flank.
+  const exhaust = new THREE.CylinderGeometry(barrel * 0.42, barrel * 0.42, size.z * 0.5, 12);
+  exhaust.rotateX(Math.PI / 2);
+  exhaust.translate(0, size.y * 0.12, size.z * 0.42);
+  parts.push(exhaust);
+
+  return { block, fins: mergeGeometries(fins), detail: mergeGeometries(parts) };
+}
+
+/** A pressure bottle or a fuel tank: a capsule with a neck and a valve. */
+export function tankParts(radius: number, length: number): {
+  shell: THREE.BufferGeometry;
+  detail: THREE.BufferGeometry;
+} {
+  const shell = new THREE.CapsuleGeometry(radius, Math.max(0.01, length - radius * 2), 6, 20);
+
+  const parts: THREE.BufferGeometry[] = [];
+  const neck = new THREE.CylinderGeometry(radius * 0.36, radius * 0.5, length * 0.12, 14);
+  neck.translate(0, length * 0.48, 0);
+  parts.push(neck);
+
+  const valve = new THREE.TorusGeometry(radius * 0.3, radius * 0.07, 6, 16);
+  valve.rotateX(Math.PI / 2);
+  valve.translate(0, length * 0.55, 0);
+  parts.push(valve);
+
+  // A band round the middle, so a bare capsule reads as a made object.
+  const band = new THREE.TorusGeometry(radius * 1.02, radius * 0.05, 6, 20);
+  band.rotateX(Math.PI / 2);
+  parts.push(band);
+
+  return { shell, detail: mergeGeometries(parts) };
+}
+
+/** A circuit board: a thin substrate carrying a package and pin headers. */
+export function boardParts(size: { x: number; y: number; z: number }): {
+  substrate: THREE.BufferGeometry;
+  detail: THREE.BufferGeometry;
+} {
+  const thickness = Math.min(size.y, 0.008);
+  const substrate = new THREE.BoxGeometry(size.x * 0.92, thickness, size.z * 0.92);
+  substrate.translate(0, -size.y * 0.5 + thickness / 2, 0);
+
+  const parts: THREE.BufferGeometry[] = [];
+
+  const chip = new THREE.BoxGeometry(size.x * 0.38, size.y * 0.24, size.z * 0.38);
+  chip.translate(0, -size.y * 0.5 + thickness + size.y * 0.12, 0);
+  parts.push(chip);
+
+  // Two rows of pins along one edge.
+  for (let row = 0; row < 2; row += 1) {
+    for (let i = 0; i < 5; i += 1) {
+      const pin = new THREE.BoxGeometry(size.x * 0.04, size.y * 0.12, size.z * 0.04);
+      pin.translate(
+        size.x * (-0.2 + i * 0.1),
+        -size.y * 0.5 + thickness + size.y * 0.06,
+        size.z * (0.3 + row * 0.08),
+      );
+      parts.push(pin);
+    }
+  }
+
+  // Capacitors: the tell that a board is a power board.
+  for (const side of [-1, 1]) {
+    const cap = new THREE.CylinderGeometry(size.x * 0.07, size.x * 0.07, size.y * 0.32, 10);
+    cap.translate(size.x * 0.3 * side, -size.y * 0.5 + thickness + size.y * 0.16, -size.z * 0.22);
+    parts.push(cap);
+  }
+
+  return { substrate, detail: mergeGeometries(parts) };
+}

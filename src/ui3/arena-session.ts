@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { PHYSICS_DT } from '../kinetic/core/units';
-import type { Design } from '../kinetic/assembly/design';
+import type { Build } from '../kinetic/machine/build';
 import {
   buildArena,
   newMatch,
@@ -22,7 +22,7 @@ import { DamageTracker, type DamageEvent } from '../kinetic/physics/damage';
 import {
   driveRobot,
   neutralInput,
-  spawnRobot,
+  spawnMachine,
   type ControlInput,
   type RobotHandle,
 } from '../kinetic/physics/robot';
@@ -36,8 +36,8 @@ import { simpleAutopilot } from './autopilot';
 
 export interface SessionOptions {
   readonly spec: ArenaSpec;
-  readonly playerDesign: Design;
-  readonly opponentDesigns: readonly Design[];
+  readonly playerMachine: Build;
+  readonly opponentMachines: readonly Build[];
 }
 
 export class ArenaSession {
@@ -58,12 +58,12 @@ export class ArenaSession {
     buildArena(this.physics, options.spec);
     this.#buildScenery();
 
-    const machines = [options.playerDesign, ...options.opponentDesigns];
+    const machines = [options.playerMachine, ...options.opponentMachines];
     const points = spawnPoints(options.spec, machines.length);
 
-    machines.forEach((design, index) => {
+    machines.forEach((build, index) => {
       const point = points[index]!;
-      const robot = spawnRobot(this.physics.world, design, {
+      const robot = spawnMachine(this.physics.world, build, {
         position: { x: point.x, z: point.z },
         yaw: point.yaw,
         id: index === 0 ? 'player' : `opponent-${index}`,

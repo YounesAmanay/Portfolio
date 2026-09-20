@@ -8,28 +8,30 @@
  */
 
 import * as THREE from 'three';
-import { analyse, type Analysis } from '../kinetic/assembly/analysis';
-import { placementCentre, placementHalfExtents, type Design } from '../kinetic/assembly/design';
-import { PRESETS, PRESET_NOTES, SCOUT } from '../kinetic/content/presets';
-import { radToRpm } from '../kinetic/core/units';
+import { MACHINES } from '../kinetic/content/machines';
+import { CELL } from '../kinetic/core/units';
+import { analyseBuild, type MachineAnalysis } from '../kinetic/machine/analysis';
+import { componentOf, occupiedCells, type Build } from '../kinetic/machine/build';
+import { ALL_COMPONENTS, findComponent, WEIGHT_CLASSES } from '../kinetic/machine/catalogue';
+import type { ComponentCategory, ComponentDef } from '../kinetic/machine/components';
+import { schematicOf } from '../kinetic/machine/schematic';
 import { ARENAS, type ArenaSpec } from '../kinetic/modes/arena';
 import { robotSpeed } from '../kinetic/physics/robot';
 import { initPhysics } from '../kinetic/physics/world';
-import { PART_LIBRARY, getPart } from '../kinetic/parts/library';
-import type { PartCategory, PartDef } from '../kinetic/parts/types';
 import { OrbitCamera } from '../render/orbit-camera';
 import { Stage } from '../render/stage';
 import { ArenaSession } from './arena-session';
+import { Bench } from './bench';
 import { Controls, createTouchButton, isTouchDevice } from './controls';
-import { Workshop } from './workshop';
+import { renderSchematic } from './schematic-view';
 
 type Mode = 'WORKSHOP' | 'ARENA';
 
-const CATEGORY_ORDER: PartCategory[] = [
-  'STRUCTURE', 'DRIVE', 'WHEEL', 'POWER', 'CONTROL', 'ARMOUR', 'WEAPON', 'THRUST', 'UTILITY',
+const CATEGORY_ORDER: ComponentCategory[] = [
+  'STRUCTURE', 'DRIVE', 'TRANSMISSION', 'WHEEL', 'POWER', 'CONTROL', 'ARMOUR', 'WEAPON', 'UTILITY',
 ];
 
-const STORAGE_KEY = 'arcforge.kinetic.design.v1';
+const STORAGE_KEY = 'arcforge.kinetic.build.v1';
 
 class App {
   readonly stage: Stage;
@@ -37,10 +39,10 @@ class App {
   readonly controls: Controls;
 
   mode: Mode = 'WORKSHOP';
-  design: Design = load() ?? SCOUT;
+  build: Build = load() ?? MACHINES[1]!;
   arenaSpec: ArenaSpec = ARENAS[0]!;
 
-  workshop: Workshop | null = null;
+  bench: Bench | null = null;
   session: ArenaSession | null = null;
 
   #clock = new THREE.Clock();
@@ -67,39 +69,46 @@ class App {
     this.session = null;
     this.mode = 'WORKSHOP';
 
-    this.workshop = new Workshop(this.stage, this.camera, {
-      onChange: (design, analysis) => {
-        this.design = design;
-        save(design);
+    this.bench = new Bench(this.stage, this.camera, {
+      onChange: (build, analysis) => {
+        this.build = build;
+        save(build);
         this.#renderReadout(analysis);
+        this.#renderSchematic();
+        this.#syncDeploy(analysis);
       },
-    }, this.design);
+      onSelect: () => {
+        this.#renderSchematic();
+        this.#renderInspector();
+      },
+      onRefused: (reason) => toast(reason),
+    }, this.build);
 
-    this.stage.scene.add(this.workshop.root);
+    this.stage.scene.add(this.bench.root);
     this.camera.follow(null);
     this.camera.setAutoSpin(0.06);
-    this.workshop.frameCamera();
+    this.bench.frameCamera();
     this.#renderChrome();
   }
 
   enterArena(): void {
-    const analysis = analyse(this.design);
+    const analysis = analyseBuild(this.build);
     if (analysis.problems.some((p) => p.severity === 'error')) return;
 
-    this.workshop?.dispose();
-    this.workshop?.root.removeFromParent();
-    this.workshop = null;
+    this.bench?.dispose();
+    this.bench?.root.removeFromParent();
+    this.bench = null;
     this.mode = 'ARENA';
     this.controls.reset();
 
     const opponents = this.arenaSpec.mode === 'CRUCIBLE'
-      ? [PRESETS.find((p) => p.name !== this.design.name) ?? PRESETS[1]!]
+      ? [MACHINES.find((m) => m.name !== this.build.name) ?? MACHINES[3]!]
       : [];
 
     this.session = new ArenaSession(this.stage, {
       spec: this.arenaSpec,
-      playerDesign: this.design,
-      opponentDesigns: opponents,
+      playerMachine: this.build,
+      opponentMachines: opponents,
     });
 
     this.camera.setAutoSpin(0);
@@ -108,7 +117,7 @@ class App {
     // siege tank need very different framing to read at all. Frame the machine
     // itself, not a generous sphere around it — the old 0.9 m floor framed a
     // scout as though it were nearly two metres across.
-    const radius = Math.max(0.26, machineRadius(this.design));
+    const radius = Math.max(0.26, machineRadius(this.build));
     const player = this.session.views[0]?.focusTarget ?? null;
 
     // Lock on before the countdown, not after it. Machines spawn on a ring
@@ -138,7 +147,7 @@ class App {
     const dt = Math.min(this.#clock.getDelta(), 0.1);
 
     if (this.mode === 'WORKSHOP') {
-      this.workshop?.update();
+      this.bench?.update();
     } else if (this.session) {
       const input = this.controls.update(dt);
       this.session.update(dt, input);
@@ -164,15 +173,11 @@ class App {
     if (this.mode === 'WORKSHOP') {
       this.#root.appendChild(this.#buildLibrary());
       this.#root.appendChild(this.#buildReadoutPanel());
-      this.#root.appendChild(this.#buildWorkshopDock());
-      this.#root.appendChild(
-        hint(
-          isTouchDevice()
-            ? 'Tap a face to add · hold to remove · drag to orbit · pinch to zoom'
-            : 'Click a face to add · right-click to remove · drag to orbit · R rotates',
-        ),
-      );
-      this.#renderReadout(analyse(this.design));
+      this.#root.appendChild(this.#buildSchematicPanel());
+      this.#root.appendChild(this.#buildBenchDock());
+      this.#root.appendChild(hint(this.#benchHint()));
+      this.#renderReadout(analyseBuild(this.build));
+      this.#renderSchematic();
     } else {
       this.#hud = this.#buildHud();
       this.#root.appendChild(this.#hud);
@@ -181,40 +186,52 @@ class App {
     this.#syncTabs();
   }
 
+  #benchHint(): string {
+    if (this.bench?.tool === 'LINK') {
+      return 'Pick a component, then pick what it drives · the wire appears on both views';
+    }
+    return isTouchDevice()
+      ? 'Tap a face to add · hold to remove · drag to orbit · pinch to zoom'
+      : 'Click a face to add · right-click to remove · drag to orbit · R rotates';
+  }
+
   #syncTabs(): void {
     for (const tab of this.#root.querySelectorAll<HTMLElement>('.tab[data-mode]')) {
       tab.setAttribute('aria-current', String(tab.dataset.mode === this.mode));
     }
   }
 
+  // ── the catalogue ────────────────────────────────────────────────────────
+
   #buildLibrary(): HTMLElement {
     const panel = el('aside', 'panel panel--library');
-    panel.appendChild(head('COMPONENTS'));
+    panel.appendChild(head('CATALOGUE'));
     const body = el('div', 'panel__body');
 
     for (const category of CATEGORY_ORDER) {
-      const parts = PART_LIBRARY.filter((p) => p.category === category);
-      if (parts.length === 0) continue;
+      const components = ALL_COMPONENTS.filter((c) => c.category === category);
+      if (components.length === 0) continue;
 
       const group = el('div', 'cat');
       group.appendChild(el('div', 'cat__name', category));
 
-      for (const part of parts) {
+      for (const component of components) {
         const button = el('button', 'part') as HTMLButtonElement;
-        button.setAttribute('aria-pressed', String(this.workshop?.selectedPartId === part.id));
-        button.appendChild(el('div', 'part__name', part.name));
-        button.appendChild(el('div', 'part__spec', specLine(part)));
+        button.setAttribute('aria-pressed', String(this.bench?.selectedComponentId === component.id));
+        button.appendChild(el('div', 'part__name', component.name));
+        button.appendChild(el('div', 'part__spec', specLine(component)));
         button.onclick = (): void => {
-          this.workshop?.selectPart(part.id);
+          this.bench?.selectComponent(component.id);
           for (const other of panel.querySelectorAll('.part')) other.setAttribute('aria-pressed', 'false');
           button.setAttribute('aria-pressed', 'true');
-          this.#showLesson(part);
+          this.#showLesson(component);
+          this.#renderChrome();
           // On a phone the sheet covers the very model you are about to place
           // onto, and the lesson lands in the other sheet, which is closed. So
           // get out of the way and carry the lesson over as a toast.
           if (isSheetLayout()) {
             openSheet(null);
-            toast(part.lesson);
+            toast(component.lesson);
           }
         };
         group.appendChild(button);
@@ -226,15 +243,105 @@ class App {
     return panel;
   }
 
-  #showLesson(part: PartDef): void {
+  #showLesson(component: ComponentDef): void {
     const host = this.#root.querySelector('#lesson-host');
     if (!host) return;
     host.replaceChildren();
     const box = el('div', 'lesson');
-    box.appendChild(el('span', 'lesson__tag', part.name.toUpperCase()));
-    box.appendChild(document.createTextNode(part.lesson));
+    box.appendChild(el('span', 'lesson__tag', component.name.toUpperCase()));
+    box.appendChild(document.createTextNode(component.lesson));
     host.appendChild(box);
   }
+
+  // ── the schematic ────────────────────────────────────────────────────────
+
+  /**
+   * The circuit, beside the model.
+   *
+   * This is the half of a machine that the 3D view physically cannot show. A
+   * motor that looks bolted in but was never wired to anything is correct from
+   * every angle, and the only way to see it is to draw the chain.
+   */
+  #buildSchematicPanel(): HTMLElement {
+    const panel = el('aside', 'panel panel--schematic');
+    panel.appendChild(head('CIRCUIT'));
+    const body = el('div', 'panel__body');
+    body.id = 'schematic-body';
+    panel.appendChild(body);
+    return panel;
+  }
+
+  #renderSchematic(): void {
+    const body = this.#root.querySelector<HTMLElement>('#schematic-body');
+    if (!body || !this.bench) return;
+
+    body.replaceChildren();
+    const frame = el('div', 'schematic__scroll');
+    renderSchematic(frame, schematicOf(this.build), this.bench.selected, {
+      onSelect: (uid) => {
+        this.bench?.select(uid);
+        this.#renderSchematic();
+        this.#renderInspector();
+      },
+    });
+    body.appendChild(frame);
+    this.#renderInspector(body);
+  }
+
+  /** What is selected, what it is joined to, and what can be done about it. */
+  #renderInspector(host?: HTMLElement): void {
+    const body = host ?? this.#root.querySelector<HTMLElement>('#schematic-body');
+    if (!body || !this.bench) return;
+    body.querySelector('.inspector')?.remove();
+
+    const uid = this.bench.selected;
+    if (!uid) return;
+    const fitted = this.build.fitted.find((f) => f.uid === uid);
+    if (!fitted) return;
+
+    const component = componentOf(fitted);
+    const box = el('div', 'inspector');
+    box.appendChild(el('div', 'inspector__name', component.name));
+    box.appendChild(el('p', 'inspector__blurb', component.blurb));
+
+    const links = this.bench.linksFor(uid);
+    if (links.length === 0) {
+      box.appendChild(el('div', 'inspector__none', 'Not connected to anything.'));
+    } else {
+      for (const link of links) {
+        const other = link.from === uid ? link.to : link.from;
+        const found = this.build.fitted.find((f) => f.uid === other);
+        if (!found) continue;
+        const row = el('div', 'inspector__link');
+        row.appendChild(
+          el('span', 'inspector__dir', link.from === uid ? '\u2192' : '\u2190'),
+        );
+        row.appendChild(el('span', 'inspector__peer', componentOf(found).name));
+        const cut = el('button', 'inspector__cut', 'cut') as HTMLButtonElement;
+        cut.onclick = (): void => {
+          this.bench?.removeLink(link);
+          this.#renderSchematic();
+        };
+        row.appendChild(cut);
+        box.appendChild(row);
+      }
+    }
+
+    const actions = el('div', 'inspector__actions');
+    actions.appendChild(button('UNLINK', () => {
+      this.bench?.unlinkSelected();
+      this.#renderSchematic();
+    }));
+    actions.appendChild(button('REMOVE', () => {
+      this.bench?.removeSelected();
+      this.#renderSchematic();
+    }, 'btn--danger'));
+    box.appendChild(actions);
+
+    body.appendChild(box);
+  }
+
+  // ── the readout ──────────────────────────────────────────────────────────
 
   #buildReadoutPanel(): HTMLElement {
     const panel = el('aside', 'panel panel--readout');
@@ -245,9 +352,24 @@ class App {
     return panel;
   }
 
-  #renderReadout(analysis: Analysis): void {
+  #renderReadout(report: MachineAnalysis): void {
     const body = this.#root.querySelector('#readout-body');
     if (!body) return;
+
+    // The weight class first, because it is the constraint everything else is
+    // a trade against. A bar reads "how much is left" at a glance; a number
+    // makes you do the subtraction.
+    const cls = el('div', 'classbar');
+    const over = report.massMargin < 0;
+    cls.appendChild(
+      el('div', 'classbar__head',
+        `${report.weightClass.name} \u00b7 ${report.mass.toFixed(2)} / ${report.weightClass.limit} kg`),
+    );
+    const track = el('div', 'classbar__track');
+    const fill = el('div', `classbar__fill${over ? ' is-over' : ''}`);
+    fill.style.width = `${Math.min(100, (report.mass / report.weightClass.limit) * 100).toFixed(1)}%`;
+    track.appendChild(fill);
+    cls.appendChild(track);
 
     const stats = el('div', 'stats');
     const add = (label: string, value: string, unit = '', tone = ''): void => {
@@ -259,29 +381,58 @@ class App {
       stats.appendChild(stat);
     };
 
-    const tipTone = analysis.tipG <= 0 ? 'bad' : analysis.tipG < 0.4 ? 'warn' : 'good';
-    const powerTone = analysis.powerMargin < 1 ? 'warn' : 'good';
+    const solution = report.solution;
+    const tipTone = report.tipG <= 0 ? 'bad' : report.tipG < 0.4 ? 'warn' : 'good';
+    const sagTone = solution.sag < 1 ? 'warn' : 'good';
 
-    add('Mass', analysis.mass.toFixed(2), 'kg');
-    add('Tips at', analysis.tipG > 0 ? analysis.tipG.toFixed(2) : '—', 'g', tipTone);
-    add('Top speed', analysis.topSpeed.toFixed(1), 'm/s');
-    add('Climb', analysis.maxGrade.toFixed(0), '°');
-    add('Wheel torque', analysis.totalTorque.toFixed(1), 'N·m');
-    add('Clearance', (analysis.groundClearance * 100).toFixed(0), 'cm',
-      analysis.groundClearance <= 0 ? 'bad' : '');
-    add('Battery', analysis.batteryCapacity.toFixed(0), 'W·h');
-    add('Power', `${(analysis.powerMargin * 100).toFixed(0)}`, '%', powerTone);
-    add('CoM height', (analysis.centreOfMass.y * 100).toFixed(0), 'cm');
-    add('Cost', analysis.cost.toFixed(0), 'cr');
+    add('Top speed', report.topSpeed.toFixed(1), 'm/s');
+    add('Wheel torque', report.totalTorque.toFixed(1), 'N\u00b7m');
+    add('Tips at', report.tipG > 0 ? report.tipG.toFixed(2) : '\u2014', 'g', tipTone);
+    add('Climb', report.maxGrade.toFixed(0), '\u00b0');
+    add('Pack', `${solution.volts.toFixed(1)}`, 'V');
+    add('Draw', `${solution.demandAmps.toFixed(0)}/${solution.supplyAmps.toFixed(0)}`, 'A', sagTone);
+    add('Endurance', report.endurance > 0 ? (report.endurance / 60).toFixed(1) : '\u2014', 'min');
+    add('Clearance', (report.groundClearance * 100).toFixed(1), 'cm',
+      report.groundClearance <= 0 ? 'bad' : '');
+    add('Channels', `${report.channelsUsed}/${report.channelsAvailable}`, '');
+    add('Cost', report.cost.toFixed(0), 'cr');
 
-    body.replaceChildren(stats);
+    body.replaceChildren(cls, stats);
 
-    if (analysis.problems.length > 0) {
+    for (const spinner of solution.spinners) {
+      const row = el('div', 'weaponline');
+      row.appendChild(el('span', 'weaponline__name', spinner.component.name));
+      row.appendChild(el('span', 'weaponline__spec',
+        spinner.driven
+          ? `${spinner.energy.toFixed(0)} J \u00b7 ${spinner.spinUp.toFixed(1)} s \u00b7 ${spinner.tipSpeed.toFixed(0)} m/s tip`
+          : 'nothing turning it'));
+      body.appendChild(row);
+    }
+    for (const arm of solution.arms) {
+      const row = el('div', 'weaponline');
+      row.appendChild(el('span', 'weaponline__name', arm.component.name));
+      row.appendChild(el('span', 'weaponline__spec',
+        arm.armed ? `${arm.torque.toFixed(0)} N\u00b7m \u00b7 ${arm.bar} bar \u00b7 ${arm.shots} shots` : 'no gas'));
+      body.appendChild(row);
+    }
+
+    if (report.problems.length > 0) {
       const list = el('div', 'problems');
-      for (const problem of analysis.problems) {
-        const item = el('div', `problem problem--${problem.severity}`);
+      for (const problem of report.problems) {
+        const item = el('button', `problem problem--${problem.severity}`) as HTMLButtonElement;
         item.appendChild(el('span', 'problem__mark', problem.severity === 'error' ? '!!' : '~'));
         item.appendChild(el('span', '', problem.message));
+        // A fault that names a component selects it, so "which one" is never
+        // a question you have to answer by hunting round the model.
+        if (problem.uid) {
+          item.classList.add('problem--locatable');
+          item.onclick = (): void => {
+            this.bench?.select(problem.uid!);
+            this.#renderSchematic();
+          };
+        } else {
+          item.disabled = true;
+        }
         list.appendChild(item);
       }
       body.appendChild(list);
@@ -290,36 +441,68 @@ class App {
     const lessonHost = el('div', '');
     lessonHost.id = 'lesson-host';
     body.appendChild(lessonHost);
-    const selected = this.workshop ? getPart(this.workshop.selectedPartId) : undefined;
+    const selected = this.bench ? findComponent(this.bench.selectedComponentId) : undefined;
     if (selected) this.#showLesson(selected);
   }
 
-  #buildWorkshopDock(): HTMLElement {
+  #syncDeploy(report: MachineAnalysis): void {
+    const deploy = this.#root.querySelector<HTMLButtonElement>('.btn--go');
+    if (deploy) deploy.disabled = report.problems.some((p) => p.severity === 'error');
+  }
+
+  // ── the dock ─────────────────────────────────────────────────────────────
+
+  #buildBenchDock(): HTMLElement {
     const dock = el('div', 'dock');
 
     // Phone-only, and first in the row: without these the sheets stay parked
-    // off-screen and the component library cannot be reached at all.
+    // off-screen and the catalogue cannot be reached at all.
     dock.appendChild(sheetToggle('PARTS', '.panel--library'));
+    dock.appendChild(sheetToggle('CIRCUIT', '.panel--schematic'));
     dock.appendChild(sheetToggle('SPECS', '.panel--readout'));
 
+    // The two gestures, side by side, because they are the whole interaction.
+    const tools = el('div', 'toolset');
+    for (const [tool, label] of [['PLACE', 'BUILD'], ['LINK', 'WIRE']] as const) {
+      const btn = el('button', 'tool') as HTMLButtonElement;
+      btn.textContent = label;
+      btn.setAttribute('aria-pressed', String(this.bench?.tool === tool));
+      btn.onclick = (): void => {
+        this.bench?.setTool(tool);
+        this.#renderChrome();
+      };
+      tools.appendChild(btn);
+    }
+    dock.appendChild(tools);
+
+    const classes = el('select', '') as HTMLSelectElement;
+    for (const weight of WEIGHT_CLASSES) {
+      classes.appendChild(new Option(`${weight.name}  ${weight.limit} kg`, weight.id));
+    }
+    classes.value = this.build.weightClass;
+    classes.onchange = (): void => {
+      this.bench?.setWeightClass(classes.value);
+      toast(WEIGHT_CLASSES.find((w) => w.id === classes.value)?.blurb ?? '');
+    };
+    dock.appendChild(classes);
+
     const presets = el('select', '') as HTMLSelectElement;
-    presets.appendChild(new Option('LOAD PRESET…', ''));
-    for (const preset of PRESETS) presets.appendChild(new Option(preset.name, preset.name));
+    presets.appendChild(new Option('LOAD MACHINE\u2026', ''));
+    for (const machine of MACHINES) presets.appendChild(new Option(machine.name, machine.name));
     presets.onchange = (): void => {
-      const found = PRESETS.find((p) => p.name === presets.value);
+      const found = MACHINES.find((m) => m.name === presets.value);
       if (!found) return;
-      this.design = found;
-      this.workshop?.setDesign(found);
-      this.workshop?.frameCamera();
+      this.build = found;
+      this.bench?.setBuild(found);
+      this.bench?.frameCamera();
       presets.value = '';
-      const note = PRESET_NOTES[found.name];
-      if (note) toast(note);
+      this.#renderChrome();
     };
     dock.appendChild(presets);
 
-    dock.appendChild(button('ROTATE  R', () => this.workshop?.rotate()));
-    dock.appendChild(button('FRAME', () => this.workshop?.frameCamera()));
-    dock.appendChild(button('CLEAR', () => this.workshop?.clear(), 'btn--danger'));
+    dock.appendChild(button('ROTATE  R', () => this.bench?.rotate()));
+    dock.appendChild(button('FRAME', () => this.bench?.frameCamera()));
+    dock.appendChild(button('CLEAR', () => this.bench?.clear(), 'btn--danger'));
 
     const arenaSelect = el('select', '') as HTMLSelectElement;
     for (const spec of ARENAS) arenaSelect.appendChild(new Option(spec.name, spec.id));
@@ -330,13 +513,17 @@ class App {
     };
     dock.appendChild(arenaSelect);
 
-    const deploy = button('DEPLOY  ▸', () => this.enterArena(), 'btn--go') as HTMLButtonElement;
-    const analysis = analyse(this.design);
-    deploy.disabled = analysis.problems.some((p) => p.severity === 'error');
+    const deploy = button('DEPLOY  \u25b8', () => this.enterArena(), 'btn--go') as HTMLButtonElement;
+    deploy.disabled = analyseBuild(this.build).problems.some((p) => p.severity === 'error');
     dock.appendChild(deploy);
 
     window.addEventListener('keydown', (event) => {
-      if (this.mode === 'WORKSHOP' && event.code === 'KeyR') this.workshop?.rotate();
+      if (this.mode !== 'WORKSHOP') return;
+      if (event.code === 'KeyR') this.bench?.rotate();
+      if (event.code === 'KeyW') {
+        this.bench?.setTool(this.bench.tool === 'LINK' ? 'PLACE' : 'LINK');
+        this.#renderChrome();
+      }
     });
 
     return dock;
@@ -382,9 +569,9 @@ class App {
       // Weapon sits above the throttle, reachable without letting go of it.
       driving.appendChild(createTouchButton('WEAPON', (d) => this.controls.setWeapon(d), 'touch-btn--weapon'));
       // Thrusters only appear on a machine that has any.
-      if (this.design.placements.some((p) => getPart(p.partId)?.thruster !== undefined)) {
-        driving.appendChild(createTouchButton('LIFT', (d) => this.controls.setLift(d), 'touch-btn--weapon'));
-      }
+      // No lift control: nothing in the component catalogue flies. The
+      // thrusters the part model carried have no equivalent yet, and a button
+      // wired to nothing is worse than a missing one.
       const pedals = el('div', 'pedals');
       pedals.appendChild(createTouchButton('▼', (d) => this.controls.setThrottle(-1, d), 'touch-btn--reverse'));
       pedals.appendChild(createTouchButton('▲', (d) => this.controls.setThrottle(1, d), 'touch-btn--throttle'));
@@ -475,15 +662,19 @@ function headingOf(session: ArenaSession | null): number {
   return Math.atan2(x, z);
 }
 
-/** Rough bounding radius of a design, in metres. Used for camera framing. */
-function machineRadius(design: Design): number {
+/** Rough bounding radius of a machine, in metres. Used for camera framing. */
+function machineRadius(build: Build): number {
+  const report = analyseBuild(build);
   let max = 0.2;
-  for (const placement of design.placements) {
-    const centre = placementCentre(placement);
-    const half = placementHalfExtents(placement);
-    max = Math.max(max, Math.hypot(centre.x + half.x, centre.z + half.z));
+  for (const fitted of build.fitted) {
+    for (const cell of occupiedCells(fitted)) {
+      max = Math.max(
+        max,
+        Math.hypot(cell.x * CELL - report.centreOfMass.x, cell.z * CELL - report.centreOfMass.z),
+      );
+    }
   }
-  return max / 2;
+  return max;
 }
 
 function el(tag: string, className: string, text?: string): HTMLElement {
@@ -564,21 +755,35 @@ function setGauge(hud: HTMLElement, key: string, fraction: number, label: string
   if (value) value.textContent = label;
 }
 
-function specLine(part: PartDef): string {
-  const bits = [`${part.mass.toFixed(2)} kg`];
-  if (part.drive) {
-    bits.push(`${part.drive.wheelTorque.toFixed(1)} N·m`);
-    bits.push(`${(part.drive.freeSpeed * part.drive.radius).toFixed(1)} m/s`);
+/**
+ * The one line under a catalogue entry.
+ *
+ * Datasheet figures only — Kv, ohms, a ratio, a cell count. Deliberately never
+ * a torque or a top speed, because a component does not have one: those depend
+ * on the pack behind it and the gearbox in front, and printing a number here
+ * would be the catalogue lying about two decisions at once.
+ */
+function specLine(c: ComponentDef): string {
+  const bits = [`${(c.mass * 1000).toFixed(0)} g`];
+  if (c.motor) bits.push(`${c.motor.kv} Kv`, `${c.motor.resistance} \u03a9`, `${c.motor.maxCells}S max`);
+  if (c.engine) bits.push(`${(c.engine.peakPower / 1000).toFixed(1)} kW`, `${c.engine.peakRpm} rpm`);
+  if (c.gearbox) bits.push(`${c.gearbox.ratio}:1`, `${c.gearbox.stages} stage${c.gearbox.stages === 1 ? '' : 's'}`);
+  if (c.clutch) bits.push(`${c.clutch.engageRpm} rpm`, `${c.clutch.torqueRating} N\u00b7m`);
+  if (c.wheel) bits.push(`${(c.wheel.diameter * 1000).toFixed(0)} mm`, `grip ${c.wheel.grip}`);
+  if (c.pack) {
+    bits.push(`${c.pack.cells}S`, `${(c.pack.capacity * 1000).toFixed(0)} mAh`, `${c.pack.cRating}C`);
   }
-  if (part.battery) bits.push(`${part.battery.capacity.toFixed(0)} W·h`);
-  if (part.weapon?.inertia && part.weapon.maxSpin) {
-    const joules = 0.5 * part.weapon.inertia * part.weapon.maxSpin ** 2;
-    bits.push(`${(joules / 1000).toFixed(1)} kJ`);
-    bits.push(`${radToRpm(part.weapon.maxSpin).toFixed(0)} rpm`);
+  if (c.esc) bits.push(`${c.esc.maxCells}S`, `${c.esc.maxAmps} A`);
+  if (c.receiver) bits.push(`${c.receiver.channels} ch`);
+  if (c.spinner) bits.push(`${c.spinner.inertia} kg\u00b7m\u00b2`, `${(c.spinner.reach * 1000).toFixed(0)} mm`);
+  if (c.arm) bits.push(`${(c.arm.reach * 1000).toFixed(0)} mm`, `${c.arm.forceRating} N max`);
+  if (c.gas) bits.push(`${c.gas.litres} L`, `${c.gas.bar} bar`);
+  if (c.regulator) bits.push(`${c.regulator.bar} bar`);
+  if (c.tank) bits.push(`${c.tank.litres} L`);
+  if (c.category === 'ARMOUR' || c.category === 'STRUCTURE') {
+    bits.push(`${(c.integrity / 1000).toFixed(1)} kJ`);
   }
-  if (part.thruster) bits.push(`${part.thruster.thrust} N`);
-  if (part.category === 'ARMOUR') bits.push(`${(part.integrity / 1000).toFixed(1)} kJ`);
-  return bits.join('  ·  ');
+  return bits.join('  \u00b7  ');
 }
 
 let toastTimer = 0;
@@ -591,18 +796,32 @@ function toast(message: string): void {
   toastTimer = window.setTimeout(() => node.remove(), 6000);
 }
 
-function save(design: Design): void {
+function save(build: Build): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(design));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(build));
   } catch { /* storage may be blocked; losing a save beats losing the session */ }
 }
 
-function load(): Design | null {
+/**
+ * The last machine, if there is one and it still makes sense.
+ *
+ * A save from an older catalogue can name components that no longer exist, and
+ * rebuilding it would throw somewhere deep in the solver. Checking here means a
+ * stale save costs the player their machine, not their session.
+ */
+function load(): Build | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Design;
-    return parsed?.placements?.length ? parsed : null;
+    const parsed = JSON.parse(raw) as Build;
+    if (!parsed?.fitted?.length) return null;
+    if (!parsed.fitted.every((f) => findComponent(f.componentId))) return null;
+    return {
+      name: parsed.name ?? 'SAVED MACHINE',
+      weightClass: parsed.weightClass ?? 'hobby',
+      fitted: parsed.fitted,
+      links: parsed.links ?? [],
+    };
   } catch {
     return null;
   }
