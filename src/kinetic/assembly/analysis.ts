@@ -63,6 +63,9 @@ export interface Analysis {
   /** Whether grip, rather than torque, is the binding limit. */
   readonly gripLimited: boolean;
 
+  /** Gap between the lowest non-wheel part and the wheel contact line, m. */
+  readonly groundClearance: number;
+
   readonly channelsUsed: number;
   readonly channelsAvailable: number;
   readonly totalIntegrity: number;
@@ -76,22 +79,48 @@ export interface Problem {
   readonly message: string;
 }
 
-/** Contact patches sit at the bottom of a wheel, so we need its lowest point. */
-function contactFor(placement: Placement, part: PartDef): ContactPoint | null {
+/**
+ * Ground contacts for one part.
+ *
+ * A wheel touches at a point, but a track touches along its whole length —
+ * and that difference is the entire reason tracks resist tipping. Treating a
+ * four-cell track unit as a single point gave a two-track machine a support
+ * "polygon" that was a straight line, so the builder reported it as infinitely
+ * tippy while the simulation happily drove it. Elongated units therefore emit
+ * a contact near each end.
+ */
+export function contactsFor(placement: Placement, part: PartDef): ContactPoint[] {
   const spec = part.drive ?? part.roller;
-  if (!spec) return null;
+  if (!spec) return [];
 
   const centre = placementCentre(placement);
   let lowest = Infinity;
-  for (const cell of occupiedCells(placement)) lowest = Math.min(lowest, cell.y * CELL);
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  for (const cell of occupiedCells(placement)) {
+    lowest = Math.min(lowest, cell.y * CELL);
+    minX = Math.min(minX, cell.x * CELL); maxX = Math.max(maxX, (cell.x + 1) * CELL);
+    minZ = Math.min(minZ, cell.z * CELL); maxZ = Math.max(maxZ, (cell.z + 1) * CELL);
+  }
 
-  return {
+  const make = (x: number, z: number): ContactPoint => ({
     placement,
-    position: { x: centre.x, y: lowest, z: centre.z },
+    position: { x, y: lowest, z },
     radius: spec.radius,
     grip: spec.grip,
     driven: Boolean(part.drive),
-  };
+  });
+
+  const spanX = maxX - minX;
+  const spanZ = maxZ - minZ;
+  const LONG = CELL * 2.5;   // longer than a wheel pod: treat as a patch
+
+  if (spanZ > LONG && spanZ >= spanX) {
+    return [make(centre.x, minZ + spanZ * 0.12), make(centre.x, maxZ - spanZ * 0.12)];
+  }
+  if (spanX > LONG) {
+    return [make(minX + spanX * 0.12, centre.z), make(maxX - spanX * 0.12, centre.z)];
+  }
+  return [make(centre.x, centre.z)];
 }
 
 export function analyse(design: Design): Analysis {
@@ -141,9 +170,31 @@ export function analyse(design: Design): Analysis {
       channels.add(part.weapon.channel);
     }
 
-    const contact = contactFor(placement, part);
-    if (contact) contacts.push(contact);
+    contacts.push(...contactsFor(placement, part));
   }
+
+  // Ground clearance: the lowest point of the body against the lowest wheel
+  // contact. Negative means the chassis rests on the floor and the wheels are
+  // carrying nothing — the single most common first-build mistake.
+  let lowestBody = Infinity;
+  for (const placement of design.placements) {
+    const part = partOf(placement);
+    if (part.drive || part.roller) continue;
+    for (const cell of occupiedCells(placement)) lowestBody = Math.min(lowestBody, cell.y * CELL);
+  }
+  let lowestContact = Infinity;
+  for (const contact of contacts) {
+    lowestContact = Math.min(lowestContact, contact.position.y + contact.radius - contact.radius);
+  }
+  // A wheel's contact sits one radius below its centre; `position.y` already
+  // holds the bottom of its lattice box, so the true contact is that plus the
+  // gap between box bottom and tyre bottom.
+  for (const contact of contacts) {
+    const boxBottom = contact.position.y;
+    lowestContact = Math.min(lowestContact, boxBottom);
+  }
+  const groundClearance =
+    Number.isFinite(lowestBody) && Number.isFinite(lowestContact) ? lowestBody - lowestContact : 0;
 
   const centreOfMass: Vec3 =
     mass > 0 ? { x: mx / mass, y: my / mass, z: mz / mass } : { x: 0, y: 0, z: 0 };
@@ -213,6 +264,17 @@ export function analyse(design: Design): Analysis {
         message: `${channels.size} functions need channels but the controller provides ${channelsAvailable}. Fit an Avionics Stack.`,
       });
     }
+    if (contacts.length > 0 && groundClearance <= 0) {
+      problems.push({
+        severity: 'error',
+        message: `No ground clearance — the body sits ${Math.abs(groundClearance * 100).toFixed(0)} cm below the wheel contact line. It will rest on its belly with the wheels spinning in the air. Move the chassis up.`,
+      });
+    } else if (contacts.length > 0 && groundClearance < 0.03) {
+      problems.push({
+        severity: 'warning',
+        message: `Only ${(groundClearance * 100).toFixed(0)} cm of ground clearance. Anything on the floor will ground it out.`,
+      });
+    }
     if (contacts.length > 0 && contacts.length < 3 && drivenWheels < 2) {
       problems.push({ severity: 'warning', message: 'Fewer than three contact points — this will fall over unless you intend it to balance.' });
     }
@@ -237,7 +299,7 @@ export function analyse(design: Design): Analysis {
   }
 
   return {
-    mass, centreOfMass, contacts, supportPolygon: hull,
+    mass, centreOfMass, contacts, supportPolygon: hull, groundClearance,
     stabilityMargin, tipAngle, tipG,
     batteryCapacity, batteryPeak, peakDraw, powerMargin,
     drivenWheels, totalTorque, topSpeed, maxGrade, gripLimited,
