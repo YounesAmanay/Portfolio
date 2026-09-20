@@ -119,7 +119,12 @@ class App {
       player?.getWorldPosition(new THREE.Vector3()) ?? new THREE.Vector3(0, 0.26, 0),
       radius * 1.25,
     );
-    this.camera.setAngles(28, 58);
+    // A low chase angle, near the machine's own height rather than looking
+    // down on it. At 58 degrees the camera was pitched steeply enough that the
+    // arena walls sat above the top of the frame for the whole match: the
+    // venue existed and was never once on screen. Low also reads faster,
+    // because the floor sweeps past instead of rotating underneath.
+    this.camera.setAngles(28, 76);
     this.#renderChrome();
   }
 

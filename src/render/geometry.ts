@@ -35,7 +35,10 @@ export const CHAMFER = 0.002;
  */
 export function chamferedBox(x: number, y: number, z: number): THREE.BufferGeometry {
   const radius = Math.min(CHAMFER, Math.min(x, y, z) * 0.18);
-  return new RoundedBoxGeometry(x, y, z, 2, radius);
+  // One segment, not two: a single bevel face is what a machined edge break
+  // actually is, and it halves the triangle count of every body in the game.
+  // Two segments spent them rounding a 2 mm corner nobody can resolve.
+  return new RoundedBoxGeometry(x, y, z, 1, radius);
 }
 
 // ── wheels ─────────────────────────────────────────────────────────────────

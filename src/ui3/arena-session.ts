@@ -27,6 +27,9 @@ import {
   type RobotHandle,
 } from '../kinetic/physics/robot';
 import { PhysicsWorld } from '../kinetic/physics/world';
+import { buildVenue } from '../render/arena-scenery';
+import { chamferedBox } from '../render/geometry';
+import { finishMaterial } from '../render/materials';
 import { RobotView } from '../render/robot-view';
 import type { Stage } from '../render/stage';
 import { simpleAutopilot } from './autopilot';
@@ -113,37 +116,16 @@ export class ArenaSession {
     // metre grid on top gives a coarser reference that survives motion blur.
     // The floor markings are a texture, not geometry — see floorTexture.
 
-    const wallMaterial = new THREE.MeshStandardMaterial({
-      color: '#202935', metalness: 0.7, roughness: 0.45,
-    });
-    const half = size / 2;
-    for (const [x, z, rot] of [[0, -half, 0], [0, half, 0], [-half, 0, Math.PI / 2], [half, 0, Math.PI / 2]] as const) {
-      const wall = new THREE.Mesh(new THREE.BoxGeometry(size, 1.2, 0.8), wallMaterial);
-      wall.position.set(x, 0.6, z);
-      wall.rotation.y = rot;
-      wall.castShadow = true;
-      wall.receiveShadow = true;
-      this.root.add(wall);
-    }
+    // The venue shell: ribbed walls, hazard kerbs, corner towers, stands,
+    // an overhead truss and its fixtures. See render/arena-scenery.
+    this.root.add(
+      buildVenue({ size, slick, detail: this.stage.quality.label !== 'low' }),
+    );
 
-    // Emissive strips along the walls. They read as arena lighting and, more
-    // usefully, give the eye a fixed reference for how fast you are moving.
-    const stripMaterial = new THREE.MeshStandardMaterial({
-      color: '#4de2ff', emissive: '#4de2ff', emissiveIntensity: 1.1, toneMapped: false,
-    });
-    for (const [x, z, rot] of [[0, -half, 0], [0, half, 0], [-half, 0, Math.PI / 2], [half, 0, Math.PI / 2]] as const) {
-      const strip = new THREE.Mesh(new THREE.BoxGeometry(size * 0.92, 0.035, 0.05), stripMaterial);
-      strip.position.set(x, 1.16, z);
-      strip.rotation.y = rot;
-      this.root.add(strip);
-    }
-
-    const obstacleMaterial = new THREE.MeshStandardMaterial({
-      color: '#33404f', metalness: 0.55, roughness: 0.6,
-    });
+    const obstacleMaterial = finishMaterial('steel', { tint: '#59636f', repeat: 2 });
     for (const obstacle of spec.obstacles) {
       const mesh = new THREE.Mesh(
-        new THREE.BoxGeometry(obstacle.halfExtents.x * 2, obstacle.halfExtents.y * 2, obstacle.halfExtents.z * 2),
+        chamferedBox(obstacle.halfExtents.x * 2, obstacle.halfExtents.y * 2, obstacle.halfExtents.z * 2),
         obstacleMaterial,
       );
       mesh.position.set(obstacle.position.x, obstacle.position.y, obstacle.position.z);
