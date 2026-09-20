@@ -262,23 +262,86 @@ option { background: var(--panel-solid); }
   padding: 6px 12px; backdrop-filter: blur(12px); pointer-events: none; white-space: nowrap;
 }
 
-/* ── responsive ──────────────────────────────────────────────────────────── */
+/* ── responsive ──────────────────────────────────────────── */
 
-.sheet-toggle { display: none; }
+/*
+ * Below the breakpoint the two side columns become bottom sheets, opened one
+ * at a time from the dock. The dock itself stops wrapping and becomes a single
+ * scrolling row, because five stacked rows of controls ate a fifth of the
+ * screen and buried the thing you are building.
+ */
+
+.sheet-toggle, .sheet-close { display: none; }
 
 @media (max-width: 900px) {
   .panel--library, .panel--readout {
-    left: 8px; right: 8px; width: auto; top: auto; bottom: 8px;
-    max-height: 46vh; transform: translateY(calc(100% + 16px));
-    transition: transform .28s var(--ease);
+    left: 6px; right: 6px; width: auto; top: auto; bottom: 6px;
+    max-height: min(56vh, 460px);
+    /* Parked below the fold; `is-open` slides it up. The extra 24px clears
+       the shadow so no edge peeks above the bottom of the screen. */
+    transform: translateY(calc(100% + 24px));
+    transition: transform .3s var(--ease);
+    z-index: 22;
+    box-shadow: 0 -18px 50px -20px rgba(0,0,0,0.9);
   }
   .panel.is-open { transform: translateY(0); }
+  .panel__body { padding: 10px 10px calc(10px + env(safe-area-inset-bottom)); }
+
   .sheet-toggle { display: inline-flex; }
-  .dock { bottom: 8px; padding: 6px; }
+  .sheet-toggle[aria-pressed='true'] {
+    color: var(--cyan); border-color: rgba(77,226,255,0.45); background: rgba(77,226,255,0.12);
+  }
+  .sheet-close {
+    display: grid; place-items: center;
+    width: 34px; height: 34px; margin: -8px -6px -8px 0;
+    appearance: none; background: none; border: 0; cursor: pointer;
+    color: var(--ink-dim); font-size: 13px;
+  }
+
+  /* One row, scrolled sideways rather than wrapped. */
+  .dock {
+    left: 6px; right: 6px; bottom: calc(6px + env(safe-area-inset-bottom));
+    transform: none; max-width: none;
+    flex-wrap: nowrap; justify-content: flex-start;
+    overflow-x: auto; overscroll-behavior-x: contain;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    border-radius: 12px; padding: 6px;
+  }
+  .dock::-webkit-scrollbar { display: none; }
+  .dock > * { flex: 0 0 auto; }
   .dock.is-hidden { display: none; }
-  .gauges { width: 150px; bottom: 8px; left: 8px; }
+
+  /* Fingers are not cursors: nothing tappable goes below 44px. */
+  .btn, select, .tab { min-height: 44px; padding-top: 0; padding-bottom: 0; }
+  .btn, select { display: inline-flex; align-items: center; }
+  .part { padding: 11px 10px; }
+
+  .topbar { padding: 8px 10px; gap: 8px; }
+  .brand__sub { display: none; }
+
+  .hint {
+    bottom: calc(62px + env(safe-area-inset-bottom));
+    left: 6px; right: 6px; transform: none;
+    white-space: normal; text-align: center; line-height: 1.5;
+  }
+
+  .gauges { width: 148px; bottom: calc(6px + env(safe-area-inset-bottom)); left: 6px; }
   .hud__big { font-size: 34px; }
-  .stick { bottom: 78px; width: 104px; height: 104px; }
+  .hud__status { top: 58px; }
+
+  .stick { left: 14px; bottom: calc(86px + env(safe-area-inset-bottom)); width: 104px; height: 104px; }
+  .stick__knob { width: 46px; height: 46px; margin: -23px 0 0 -23px; }
+  .touch-cluster { right: 14px; bottom: calc(86px + env(safe-area-inset-bottom)); gap: 8px; }
   .touch-btn { width: 64px; height: 64px; }
-  .touch-cluster { bottom: 78px; }
+}
+
+/* Landscape phones are short, not narrow: reclaim the vertical budget. */
+@media (max-width: 900px) and (max-height: 480px) {
+  .panel--library, .panel--readout { max-height: 78vh; }
+  .stick { bottom: calc(10px + env(safe-area-inset-bottom)); width: 92px; height: 92px; }
+  .touch-cluster { bottom: calc(10px + env(safe-area-inset-bottom)); grid-auto-flow: column; }
+  .touch-btn { width: 56px; height: 56px; }
+  .gauges { width: 132px; }
+  .hud__big { font-size: 26px; }
+  .hint { display: none; }
 }

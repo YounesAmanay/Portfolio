@@ -49,6 +49,8 @@ export class Workshop {
   readonly root = new THREE.Group();
   readonly #placed = new THREE.Group();
   readonly #overlay = new THREE.Group();
+  /** The platform surface — the only thing besides a placed part you can build on. */
+  #deck: THREE.Mesh | null = null;
   #ghost: THREE.Object3D | null = null;
   #hoverCell: Cell | null = null;
 
@@ -83,6 +85,7 @@ export class Workshop {
     deck.position.set(size / 2, -0.02, size / 2);
     deck.receiveShadow = true;
     this.root.add(deck);
+    this.#deck = deck;
 
     // Lattice lines, so cell boundaries are visible without a heavy grid mesh.
     const grid = new THREE.GridHelper(size, BUILD_EXTENT, '#1d3a4d', '#12202c');
@@ -215,9 +218,15 @@ export class Workshop {
   #resolveTargetCell(): Cell | null {
     this.#raycaster.setFromCamera(this.#pointer, this.stage.camera);
 
-    const hits = this.#raycaster.intersectObjects([this.#placed, this.root], true);
-    const hit = hits.find((h) => h.object.visible && !this.#overlay.getObjectById(h.object.id));
-    if (!hit || !hit.face) return null;
+    // Only real build surfaces are raycast. Pointing the ray at `root` also
+    // swept the lattice grid and the platform outline, which is what broke
+    // placement entirely — see firstBuildableHit.
+    const targets: THREE.Object3D[] = [this.#placed];
+    if (this.#deck) targets.push(this.#deck);
+
+    const hits = this.#raycaster.intersectObjects(targets, true);
+    const hit = firstBuildableHit(hits, (object) => this.#overlay.getObjectById(object.id) !== undefined);
+    if (!hit?.face) return null;
 
     const part = getPart(this.selectedPartId);
     if (!part) return null;
@@ -304,6 +313,11 @@ export class Workshop {
       this.#refreshGhost();
     });
 
+    // Right-click removes a part, so the browser's own menu must not open.
+    // Touch gets the same gesture as a long press, which would otherwise raise
+    // the selection callout instead.
+    canvas.addEventListener('contextmenu', (event) => event.preventDefault());
+
     canvas.addEventListener('pointerdown', (event) => {
       downAt = performance.now();
       downPos.set(event.clientX, event.clientY);
@@ -366,3 +380,23 @@ export class Workshop {
 
 /** Half-extent helper re-exported for the HUD's part previews. */
 export { placementHalfExtents, partOf };
+
+/**
+ * The nearest hit that can actually be built against.
+ *
+ * Helper geometry — the lattice grid, the platform outline — is made of lines,
+ * and Three raycasts a line against a one-metre threshold. The build platform
+ * is only about 1.3 m across, so very nearly every ray passed within a metre
+ * of some grid line and reported that line as the nearest hit. A line carries
+ * no face, so taking the nearest hit unconditionally resolved to null and
+ * *no part could ever be placed*, at any pointer position, on any device.
+ *
+ * Faces only, never the overlay. Kept separate from the class so it can be
+ * tested without a WebGL context.
+ */
+export function firstBuildableHit(
+  hits: readonly THREE.Intersection[],
+  isOverlay: (object: THREE.Object3D) => boolean,
+): THREE.Intersection | null {
+  return hits.find((hit) => hit.face != null && hit.object.visible && !isOverlay(hit.object)) ?? null;
+}

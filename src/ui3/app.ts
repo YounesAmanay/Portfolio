@@ -145,7 +145,13 @@ class App {
       this.#root.appendChild(this.#buildLibrary());
       this.#root.appendChild(this.#buildReadoutPanel());
       this.#root.appendChild(this.#buildWorkshopDock());
-      this.#root.appendChild(hint('Click a face to add · right-click to remove · drag to orbit · R rotates'));
+      this.#root.appendChild(
+        hint(
+          isTouchDevice()
+            ? 'Tap a face to add · hold to remove · drag to orbit · pinch to zoom'
+            : 'Click a face to add · right-click to remove · drag to orbit · R rotates',
+        ),
+      );
       this.#renderReadout(analyse(this.design));
     } else {
       this.#hud = this.#buildHud();
@@ -183,6 +189,13 @@ class App {
           for (const other of panel.querySelectorAll('.part')) other.setAttribute('aria-pressed', 'false');
           button.setAttribute('aria-pressed', 'true');
           this.#showLesson(part);
+          // On a phone the sheet covers the very model you are about to place
+          // onto, and the lesson lands in the other sheet, which is closed. So
+          // get out of the way and carry the lesson over as a toast.
+          if (isSheetLayout()) {
+            openSheet(null);
+            toast(part.lesson);
+          }
         };
         group.appendChild(button);
       }
@@ -263,6 +276,11 @@ class App {
 
   #buildWorkshopDock(): HTMLElement {
     const dock = el('div', 'dock');
+
+    // Phone-only, and first in the row: without these the sheets stay parked
+    // off-screen and the component library cannot be reached at all.
+    dock.appendChild(sheetToggle('PARTS', '.panel--library'));
+    dock.appendChild(sheetToggle('SPECS', '.panel--readout'));
 
     const presets = el('select', '') as HTMLSelectElement;
     presets.appendChild(new Option('LOAD PRESET…', ''));
@@ -425,6 +443,51 @@ function el(tag: string, className: string, text?: string): HTMLElement {
 function head(title: string): HTMLElement {
   const node = el('div', 'panel__head');
   node.appendChild(el('span', '', title));
+
+  // On a phone the panels are bottom sheets, so each needs its own dismiss.
+  // The stylesheet hides this above the breakpoint, where the panels are
+  // always-visible columns and there is nothing to dismiss.
+  const close = el('button', 'sheet-close', '✕') as HTMLButtonElement;
+  close.type = 'button';
+  close.setAttribute('aria-label', `Close ${title.toLowerCase()}`);
+  close.onclick = (): void => openSheet(null);
+  node.appendChild(close);
+  return node;
+}
+
+/**
+ * Phone chrome: the library and the readout are bottom sheets, and only one is
+ * ever up — two half-height sheets over a 3D view leaves nothing to look at.
+ * Passing null closes whatever is open. Above the breakpoint the `is-open`
+ * class is inert, so this is safe to call at any width.
+ */
+function openSheet(selector: string | null): void {
+  for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
+    panel.classList.toggle('is-open', selector !== null && panel.matches(selector));
+  }
+  for (const toggle of document.querySelectorAll<HTMLElement>('.sheet-toggle')) {
+    const target = toggle.dataset.sheet;
+    const panel = target === undefined ? null : document.querySelector(target);
+    toggle.setAttribute('aria-pressed', String(panel?.classList.contains('is-open') === true));
+  }
+}
+
+/** Matches the stylesheet's breakpoint; the two must not drift apart. */
+const SHEET_BREAKPOINT = 900;
+
+function isSheetLayout(): boolean {
+  return window.matchMedia(`(max-width: ${SHEET_BREAKPOINT}px)`).matches;
+}
+
+function sheetToggle(label: string, selector: string): HTMLElement {
+  const node = el('button', 'btn sheet-toggle', label) as HTMLButtonElement;
+  node.type = 'button';
+  node.dataset.sheet = selector;
+  node.setAttribute('aria-pressed', 'false');
+  node.onclick = (): void => {
+    const open = document.querySelector(selector)?.classList.contains('is-open') === true;
+    openSheet(open ? null : selector);
+  };
   return node;
 }
 
