@@ -21,6 +21,7 @@ import {
 import type { PlannedPart } from '../kinetic/physics/plan';
 import type { RobotHandle } from '../kinetic/physics/robot';
 import { meshPartOfPart } from '../kinetic/appearance';
+import { addOutlines } from './outline';
 import { buildPartMesh } from './part-mesh';
 
 const YAW_QUATS = [0, 1, 2, 3].map((yaw) =>
@@ -37,6 +38,7 @@ export function buildPlacementObject(placement: Placement, ghost = false): THREE
   mesh.position.set(centre.x, centre.y, centre.z);
   mesh.quaternion.copy(YAW_QUATS[placement.yaw]!);
   mesh.userData.uid = placement.uid;
+  if (!ghost) addOutlines(mesh);
   return mesh;
 }
 
@@ -50,6 +52,9 @@ export function buildPlannedObject(part: PlannedPart, ghost = false): THREE.Obje
   mesh.position.set(part.centre.x, part.centre.y, part.centre.z);
   mesh.quaternion.copy(YAW_QUATS[part.yaw]!);
   mesh.userData.uid = part.uid;
+  // Ghosts are translucent previews; a hard black edge on one reads as a
+  // placed part and defeats the whole point of showing it faintly.
+  if (!ghost) addOutlines(mesh);
   return mesh;
 }
 

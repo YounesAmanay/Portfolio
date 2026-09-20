@@ -43,6 +43,7 @@ import { CELL } from '../kinetic/core/units';
 import { planFromBuild } from '../kinetic/physics/plan';
 import { OrbitCamera } from '../render/orbit-camera';
 import { buildPlannedObject } from '../render/robot-view';
+import { STUDIO } from '../render/palette';
 import type { Stage } from '../render/stage';
 
 const BUILD_EXTENT = 32;
@@ -94,20 +95,71 @@ export class Bench {
 
   // ── platform ─────────────────────────────────────────────────────────────
 
+  /**
+   * The set: a white cyclorama with a turntable in it.
+   *
+   * A product shot, not a workshop floor. The machines were previously built
+   * on a dark grid in a dark room, which meant a dark machine had nothing to
+   * read against and every screenshot was four grey boxes in a grey void. A
+   * bright set costs nothing and turns the machine into a silhouette.
+   */
   #buildPlatform(): void {
     const size = BUILD_EXTENT * CELL;
+    const centre = size / 2;
 
-    const deck = new THREE.Mesh(
-      new THREE.BoxGeometry(size, 0.04, size),
-      new THREE.MeshStandardMaterial({ color: '#0a0f16', metalness: 0.7, roughness: 0.6 }),
+    // The cyclorama: a large soft disc with no visible edge, so the machine
+    // sits in light rather than on a slab.
+    const floor = new THREE.Mesh(
+      new THREE.CircleGeometry(size * 1.6, 64),
+      new THREE.MeshStandardMaterial({ color: STUDIO.floor, roughness: 0.92, metalness: 0 }),
     );
-    deck.position.set(size / 2, -0.02, size / 2);
-    deck.receiveShadow = true;
+    floor.rotation.x = -Math.PI / 2;
+    floor.position.set(centre, -0.001, centre);
+    floor.receiveShadow = true;
+    this.root.add(floor);
+
+    // The turntable. Slightly proud of the floor and a touch brighter, which
+    // is what separates "the machine is on a stand" from "the machine is on
+    // the ground".
+    const podium = new THREE.Mesh(
+      new THREE.CylinderGeometry(size * 0.46, size * 0.48, 0.022, 64),
+      new THREE.MeshStandardMaterial({ color: STUDIO.podium, roughness: 0.7, metalness: 0.02 }),
+    );
+    podium.position.set(centre, 0.011, centre);
+    podium.receiveShadow = true;
+    this.root.add(podium);
+
+    const rim = new THREE.Mesh(
+      new THREE.TorusGeometry(size * 0.46, 0.006, 8, 72),
+      new THREE.MeshStandardMaterial({ color: STUDIO.podiumRim, roughness: 0.5, metalness: 0.1 }),
+    );
+    rim.rotation.x = -Math.PI / 2;
+    rim.position.set(centre, 0.023, centre);
+    this.root.add(rim);
+
+    // The build surface itself, flush with the podium. It is what the raycast
+    // hits, so it has to be a real box with real faces — the deck is the only
+    // thing besides a placed component you can build against.
+    const deck = new THREE.Mesh(
+      new THREE.BoxGeometry(size, 0.02, size),
+      new THREE.MeshStandardMaterial({
+        color: STUDIO.podium,
+        roughness: 0.68,
+        metalness: 0.02,
+        transparent: true,
+        opacity: 0.001,
+      }),
+    );
+    deck.position.set(centre, 0.012, centre);
     this.root.add(deck);
     this.#deck = deck;
 
-    const grid = new THREE.GridHelper(size, BUILD_EXTENT, '#1d3a4d', '#101a24');
-    grid.position.set(size / 2, 0.002, size / 2);
+    // A faint lattice so cells are findable without the grid becoming the
+    // subject. Dark-on-light now, and much softer than the cyan it replaced.
+    const grid = new THREE.GridHelper(size, BUILD_EXTENT, '#b9c6d8', '#d7e0ec');
+    grid.position.set(centre, 0.024, centre);
+    (grid.material as THREE.Material).transparent = true;
+    (grid.material as THREE.Material).opacity = 0.5;
     this.root.add(grid);
   }
 

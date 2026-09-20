@@ -69,6 +69,7 @@ class App {
     this.session = null;
     this.mode = 'WORKSHOP';
 
+    this.stage.setLighting('STUDIO');
     this.bench = new Bench(this.stage, this.camera, {
       onChange: (build, analysis) => {
         this.build = build;
@@ -99,6 +100,7 @@ class App {
     this.bench?.root.removeFromParent();
     this.bench = null;
     this.mode = 'ARENA';
+    this.stage.setLighting('ARENA');
     this.controls.reset();
 
     const opponents = this.arenaSpec.mode === 'CRUCIBLE'

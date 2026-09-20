@@ -20,6 +20,7 @@
 
 import * as THREE from 'three';
 import type { PartCategory, PartDef, PartFinish } from '../kinetic/parts/types';
+import { TOY_FINISH } from './palette';
 import {
   bolts,
   brushed,
@@ -312,6 +313,26 @@ export function finishMaterial(finish: Finish, options: MaterialOptions): THREE.
   const key = `${finish}|${options.tint}|${options.emissive ?? '-'}|${options.emissiveIntensity ?? 0}|${options.repeat ?? 1}`;
   const cached = materialCache.get(key);
   if (cached) return cached;
+
+  // ── the toy path ────────────────────────────────────────────────────────
+  //
+  // Flat moulded plastic: one strong colour, a soft highlight, no maps at all.
+  // The procedural wear below is still built and still correct, and at the
+  // size a part occupies on screen it read as noise — a dozen carefully
+  // scratched grey boxes that merged into one grey shape. Colour separates
+  // them; scratches never did.
+  const toy = TOY_FINISH[finish];
+  if (toy) {
+    const flat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color(options.tint),
+      roughness: toy.roughness,
+      metalness: toy.metalness,
+      emissive: new THREE.Color(options.emissive ?? '#000000'),
+      emissiveIntensity: options.emissive !== undefined ? (options.emissiveIntensity ?? 0.6) : 0,
+    });
+    materialCache.set(key, flat);
+    return flat;
+  }
 
   const maps = mapsFor(finish);
   const repeat = options.repeat ?? 1;

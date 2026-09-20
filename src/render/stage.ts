@@ -24,6 +24,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { buildEnvironment } from './environment';
+import { STUDIO } from './palette';
 
 export interface StageQuality {
   readonly shadows: boolean;
@@ -70,6 +71,9 @@ export class Stage {
   readonly camera: THREE.PerspectiveCamera;
   readonly quality: StageQuality;
   readonly sun: THREE.DirectionalLight;
+  #hemi!: THREE.HemisphereLight;
+  #rim!: THREE.DirectionalLight;
+  #lighting: 'ARENA' | 'STUDIO' = 'ARENA';
 
   /** Null on the low tier, which renders straight to the screen. */
   #composer: EffectComposer | null = null;
@@ -145,9 +149,70 @@ export class Stage {
     const rim = new THREE.DirectionalLight('#4de2ff', 1.1);
     rim.position.set(-12, 8, -14);
     this.scene.add(rim);
+    this.#hemi = hemi;
+    this.#rim = rim;
 
     this.#buildComposer();
     this.#attachResize(canvas);
+  }
+
+  /**
+   * Two sets, one stage.
+   *
+   * The arena is a dark venue: a machine reads as a lit object in it, with a
+   * cyan rim off the walls and enough fog to give the floor depth. The
+   * workshop is the opposite problem — you are inspecting the machine, not
+   * watching it — so it becomes a white studio with soft even light and no fog
+   * at all, and the machine reads as a silhouette against the set.
+   *
+   * Switching is lights and background only. Nothing about the machines
+   * changes, which is the point: a part you chose because it was orange is
+   * orange in both places.
+   */
+  setLighting(mode: 'ARENA' | 'STUDIO'): void {
+    if (this.#lighting === mode) return;
+    this.#lighting = mode;
+
+    if (mode === 'STUDIO') {
+      this.scene.background = new THREE.Color(STUDIO.background);
+      this.scene.fog = null;
+      // Flat plastic takes nearly all of its shading from ambient, so the
+      // hemisphere does the work here and the key light only shapes it.
+      // Restrained. Flat plastic has no specular detail to lose, so every
+      // extra stop of light goes straight into desaturating it: at 2.6 the
+      // hemisphere alone turned a saturated catalogue into pastel.
+      this.#hemi.color.set('#f4f8ff');
+      this.#hemi.groundColor.set('#aebdd2');
+      this.#hemi.intensity = 1.15;
+      this.sun.color.set('#fffaf2');
+      this.sun.intensity = 2.4;
+      this.sun.position.set(9, 16, 11);
+      // A soft fill from the front left, so the side facing the camera is
+      // never the dark side. Without it a saturated part goes muddy the moment
+      // it turns away from the key.
+      this.#rim.color.set('#c9dcf5');
+      this.#rim.intensity = 0.75;
+      this.#rim.position.set(-10, 6, 12);
+      // Nearly off. The environment map is a dark arena box, and any of it in
+      // a white studio drags every surface back toward grey.
+      this.scene.environmentIntensity = 0.12;
+      this.renderer.toneMappingExposure = 0.95;
+      return;
+    }
+
+    this.scene.background = new THREE.Color('#05070d');
+    this.scene.fog = new THREE.FogExp2('#080d16', 0.021);
+    this.#hemi.color.set('#8fd2ff');
+    this.#hemi.groundColor.set('#2b2218');
+    this.#hemi.intensity = 0.38;
+    this.sun.color.set('#fff4e0');
+    this.sun.intensity = 2.6;
+    this.sun.position.set(14, 22, 10);
+    this.#rim.color.set('#4de2ff');
+    this.#rim.intensity = 1.1;
+    this.#rim.position.set(-12, 8, -14);
+    this.scene.environmentIntensity = 1.5;
+    this.renderer.toneMappingExposure = 1.0;
   }
 
   /**
