@@ -10,6 +10,7 @@
  * Every figure here is derived, never authored. @see docs/10-kinetic.md
  */
 
+import { convexHullXZ, distanceToHullEdge, type Vec3 } from '../core/geometry';
 import { CELL, GRAVITY, clamp } from '../core/units';
 import type { PartDef } from '../parts/types';
 import {
@@ -20,12 +21,6 @@ import {
   type Design,
   type Placement,
 } from './design';
-
-export interface Vec3 {
-  readonly x: number;
-  readonly y: number;
-  readonly z: number;
-}
 
 export interface ContactPoint {
   readonly placement: Placement;
@@ -321,56 +316,5 @@ export function analyse(design: Design): Analysis {
   };
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Geometry
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Andrew's monotone chain, on the XZ plane. */
-export function convexHullXZ(points: readonly Vec3[]): Vec3[] {
-  if (points.length < 3) return [...points];
-
-  const sorted = [...points].sort((a, b) => a.x - b.x || a.z - b.z);
-  const cross = (o: Vec3, a: Vec3, b: Vec3): number =>
-    (a.x - o.x) * (b.z - o.z) - (a.z - o.z) * (b.x - o.x);
-
-  const build = (input: Vec3[]): Vec3[] => {
-    const stack: Vec3[] = [];
-    for (const point of input) {
-      while (stack.length >= 2 && cross(stack[stack.length - 2]!, stack[stack.length - 1]!, point) <= 0) {
-        stack.pop();
-      }
-      stack.push(point);
-    }
-    stack.pop();
-    return stack;
-  };
-
-  const hull = [...build(sorted), ...build([...sorted].reverse())];
-  return hull.length >= 3 ? hull : [...points];
-}
-
-/**
- * Shortest distance from the point's ground projection to the hull boundary.
- * Negative when the projection falls outside — the machine is already tipping.
- */
-export function distanceToHullEdge(point: Vec3, hull: readonly Vec3[]): number {
-  let minDistance = Infinity;
-  let inside = true;
-
-  for (let i = 0; i < hull.length; i++) {
-    const a = hull[i]!;
-    const b = hull[(i + 1) % hull.length]!;
-    const ex = b.x - a.x;
-    const ez = b.z - a.z;
-    const length = Math.sqrt(ex * ex + ez * ez);
-    if (length < 1e-9) continue;
-
-    // Signed distance: positive is to the left of the directed edge.
-    const side = ((point.x - a.x) * ez - (point.z - a.z) * ex) / length;
-    if (side > 0) inside = false;
-    minDistance = Math.min(minDistance, Math.abs(side));
-  }
-
-  if (!Number.isFinite(minDistance)) return 0;
-  return inside ? minDistance : -minDistance;
-}
+export { convexHullXZ, distanceToHullEdge } from '../core/geometry';
+export type { Vec3 } from '../core/geometry';

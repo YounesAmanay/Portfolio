@@ -19,6 +19,124 @@
 import { port, type ComponentDef } from './components';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// STRUCTURE — what everything else bolts to
+// ─────────────────────────────────────────────────────────────────────────────
+
+const STRUCTURE: ComponentDef[] = [
+  {
+    id: 'str.strut',
+    name: 'Carbon Strut',
+    category: 'STRUCTURE',
+    footprint: { x: 1, y: 1, z: 3 },
+    mass: 0.05,
+    integrity: 300,
+    cost: 22,
+    blurb: 'Pultruded carbon tube. A quarter the weight of the alloy rail and it shatters instead of bending.',
+    lesson: 'Light structure is brittle structure. Carbon survives one big hit and then it is confetti.',
+    visual: { shape: 'box', colour: '#2a2e34', finish: 'carbon' },
+    ports: [],
+  },
+  {
+    id: 'str.rail',
+    name: 'Alloy Rail',
+    category: 'STRUCTURE',
+    footprint: { x: 1, y: 1, z: 3 },
+    mass: 0.22,
+    integrity: 900,
+    cost: 20,
+    blurb: '6061 extrusion. The cheapest way to move a mounting point somewhere useful.',
+    lesson: 'Structure is not free mass — every rail you add raises or shifts your centre of gravity.',
+    visual: { shape: 'box', colour: '#9aa6b5', finish: 'alloy' },
+    ports: [],
+  },
+  {
+    id: 'str.pan',
+    name: 'Titanium Pan',
+    category: 'STRUCTURE',
+    footprint: { x: 3, y: 1, z: 2 },
+    mass: 0.18,
+    integrity: 1400,
+    cost: 90,
+    blurb: 'A pressed 1.5 mm titanium baseplate. Expensive, and it is the floor of the machine.',
+    lesson: 'A wide flat base is the best foundation there is: it lowers the mass and widens the stance at once.',
+    visual: { shape: 'box', colour: '#8f9aa5', finish: 'alloy' },
+    ports: [],
+  },
+  {
+    id: 'str.plate',
+    name: 'Chassis Plate',
+    category: 'STRUCTURE',
+    footprint: { x: 3, y: 1, z: 3 },
+    mass: 0.55,
+    integrity: 1600,
+    cost: 45,
+    blurb: 'Flat structural deck. Spreads load across the lattice and gives you somewhere to bolt things.',
+    lesson: 'Deck area is mounting area. Run out of it and the build starts going upward, which costs stability.',
+    visual: { shape: 'box', colour: '#7f8b9c', finish: 'alloy' },
+    ports: [],
+  },
+  {
+    id: 'str.tower',
+    name: 'Riser Tower',
+    category: 'STRUCTURE',
+    footprint: { x: 1, y: 3, z: 1 },
+    mass: 0.26,
+    integrity: 700,
+    cost: 28,
+    blurb: 'Vertical standoff. Lifts a weapon or a mount clear of the deck.',
+    lesson: 'Height buys reach and costs stability. Watch the tip angle every time you build upward.',
+    visual: { shape: 'box', colour: '#8c97a6', finish: 'alloy' },
+    ports: [],
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ARMOUR — joules absorbed per kilogram carried, and nothing else
+// ─────────────────────────────────────────────────────────────────────────────
+
+const ARMOUR: ComponentDef[] = [
+  {
+    id: 'arm.uhmw',
+    name: 'UHMW Skirt',
+    category: 'ARMOUR',
+    footprint: { x: 3, y: 1, z: 1 },
+    mass: 0.3,
+    integrity: 1800,
+    cost: 35,
+    blurb: 'Slippery polyethylene along the flank. A spinner skates off it instead of biting.',
+    lesson: 'Armour that deflects beats armour that resists. Energy you never absorb costs nothing to survive.',
+    visual: { shape: 'box', colour: '#d8dde3', finish: 'polymer' },
+    ports: [],
+  },
+  {
+    id: 'arm.poly',
+    name: 'Polycarbonate Shield',
+    category: 'ARMOUR',
+    footprint: { x: 3, y: 2, z: 1 },
+    mass: 0.9,
+    integrity: 2600,
+    cost: 60,
+    blurb: 'Springy 8 mm polycarbonate. Flexes instead of shattering, and weighs almost nothing.',
+    lesson: '2 900 J per kilogram, the best ratio in the shop, and it still will not stop a serious spinner.',
+    visual: { shape: 'box', colour: '#8fd7ff', finish: 'polymer' },
+    ports: [],
+  },
+  {
+    id: 'arm.steel',
+    name: 'Hardened Steel Plate',
+    category: 'ARMOUR',
+    footprint: { x: 3, y: 2, z: 1 },
+    mass: 2.4,
+    integrity: 7200,
+    cost: 110,
+    blurb: 'AR500 wear plate. Nothing in the arena goes through it, and you will feel every gram.',
+    lesson: '3 000 J per kilogram — barely better than the polycarbonate, for nearly three times the weight.',
+    visual: { shape: 'box', colour: '#6b7480', finish: 'hardened' },
+    ports: [],
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
 // DRIVE — the things that make torque
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -586,6 +704,8 @@ const UTILITY: ComponentDef[] = [
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const ALL_COMPONENTS: readonly ComponentDef[] = [
+  ...STRUCTURE,
+  ...ARMOUR,
   ...MOTORS,
   ...ENGINES,
   ...TRANSMISSION,
