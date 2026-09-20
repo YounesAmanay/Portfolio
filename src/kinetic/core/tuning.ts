@@ -63,6 +63,58 @@ export const ARM_DAMPING_RATIO = 0.55;
 export const SPINNER_GAIN = 40;
 export const SPINNER_TORQUE_CEILING = 1;
 
+// ── steering ───────────────────────────────────────────────────────────────
+
+/**
+ * Yaw rate, rad/s, that full steering lock asks for.
+ *
+ * Steering is closed loop on yaw rate rather than an open differential, and
+ * that is not a driver aid bolted on top — it is what the controller board in
+ * the machine is for. An open differential asks both tracks for full opposite
+ * lock, which is kinematically correct and completely undrivable: measured,
+ * a tap of steering spun SCOUT at 890 deg/s, two and a half revolutions per
+ * second, and the lighter TIPPER was not far behind. Worse, every machine span
+ * at a different rate, so nothing you learned driving one transferred.
+ *
+ * 2.8 rad/s is about 160 deg/s — a full turn in a little over two seconds.
+ */
+export const MAX_YAW_RATE = 2.8;
+
+/** Differential per rad/s of yaw error. High enough to track, low enough to settle. */
+export const YAW_GAIN = 1.4;
+
+/**
+ * How far the differential may exceed full throttle.
+ *
+ * At 1.0 the inner wheels can only ever coast, never drive backwards, so a
+ * machine at full throttle could not turn tighter than about an eight-metre
+ * arc no matter how hard the stick was pushed. Allowing the differential past
+ * the throttle lets the controller brake the inside — which is exactly how a
+ * tracked machine turns at speed — while each wheel still clamps to its own
+ * full-scale command.
+ */
+export const MAX_DIFFERENTIAL = 1.3;
+
+// ── tyres ──────────────────────────────────────────────────────────────────
+
+/**
+ * Slip speed, m/s, at which a tyre reaches its full longitudinal grip.
+ *
+ * The collider carries only the tyre's *lateral* friction, because a rigid-body
+ * solver takes one coefficient and a tyre has two: it grips along its roll and
+ * scrubs across it. The difference is applied along the rolling direction each
+ * step, and this is the slip it takes to develop it — a real tyre's force rises
+ * with slip rather than appearing all at once.
+ *
+ * The number matters more than it looks. At an effectively infinite stiffness
+ * the correction saturates within a hundredth of a metre per second, which
+ * makes it a bang-bang controller: the tiniest difference between the left and
+ * right tyres becomes the full force difference, and a machine asked to drive
+ * straight veered off by 62 degrees in three seconds. Spread over a realistic
+ * slip band it simply holds the machine straight.
+ */
+export const TYRE_SLIP_REFERENCE = 0.6;
+
 // ── damage ─────────────────────────────────────────────────────────────────
 
 /**

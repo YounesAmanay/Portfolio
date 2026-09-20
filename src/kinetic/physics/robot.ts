@@ -15,10 +15,14 @@
  */
 
 import RAPIER from '@dimforge/rapier3d-compat';
-import { AMBIENT_C, PHYSICS_DT, clamp, clamp01 } from '../core/units';
+import { AMBIENT_C, GRAVITY, PHYSICS_DT, clamp, clamp01 } from '../core/units';
 import {
   ARM_DAMPING_RATIO,
   CONTACT_THRESHOLD,
+  MAX_DIFFERENTIAL,
+  MAX_YAW_RATE,
+  TYRE_SLIP_REFERENCE,
+  YAW_GAIN,
   FLIPPER_DWELL,
   FLIPPER_RELOAD,
   FLIPPER_REST,
@@ -129,6 +133,10 @@ export interface RobotHandle {
   readonly peakWatts: number;
   /** Electrical demand this step, W. */
   draw: number;
+  /** The world this machine lives in, for contact queries. */
+  readonly world: RAPIER.World;
+  /** Static weight carried by each rolling contact, newtons. */
+  readonly weightPerContact: number;
   /** Pack output as a fraction of demand; below 1 the machine is sagging. */
   sag: number;
   alive: boolean;
@@ -349,7 +357,19 @@ export function spawnRobot(
                 ? { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 }
                 : { x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 },
             )
-            .setFriction(spec.grip)
+            // The collider carries the tyre's *lateral* grip only. A rigid-body
+            // solver takes one friction coefficient, and a tyre has two: it
+            // grips going forwards and scrubs going sideways. The longitudinal
+            // difference is applied per step in driveRobot.
+            //
+            // Before this, `lateralGrip` was declared on every drive part in
+            // the library and read by nothing, so every tyre had full grip
+            // sideways. A skid-steer machine physically could not scrub: asked
+            // to turn, all four motors stalled against their own tyres at
+            // 40-55 C while the machine lurched about on whatever the contact
+            // solver happened to do. The pivot direction was not even
+            // consistent — it came out random across a friction sweep.
+            .setFriction(spec.lateralGrip)
             .setRestitution(0.1)
             .setMass(shareOfMass)
             .setCollisionGroups(groups)
@@ -528,6 +548,10 @@ export function spawnRobot(
     peakWatts,
     draw: 0,
     sag: 1,
+    world,
+    // Static share, not a live load transfer: good enough as a traction
+    // ceiling, and it costs nothing per step to know.
+    weightPerContact: (analysis.mass * -GRAVITY) / Math.max(1, wheels.length),
     alive: true,
     destroyedReason: null,
   };
@@ -575,13 +599,27 @@ export function driveRobot(robot: RobotHandle, input: ControlInput): void {
   //      is what makes a powerful machine squat under acceleration and a
   //      spinner fight its own steering.
   const chassisRotation = robot.chassis.rotation();
+
+  // Steering is closed loop on yaw rate. The player asks for a rate, the
+  // controller works out the differential needed to hold it, and every machine
+  // therefore turns at a rate you can learn. An open differential instead asks
+  // for full opposite lock and spins a light machine at 890 deg/s.
+  const up = rotateVector(UP, chassisRotation);
+  const spinning = robot.chassis.angvel();
+  const yawRate = spinning.x * up.x + spinning.y * up.y + spinning.z * up.z;
+  const wantedYaw = clamp(input.steer, -1, 1) * MAX_YAW_RATE;
+  const differential = clamp((wantedYaw - yawRate) * YAW_GAIN, -MAX_DIFFERENTIAL, MAX_DIFFERENTIAL);
+
   for (const wheel of robot.wheels) {
     if (!wheel.attached || !wheel.part.drive) continue;
 
     const spec = wheel.part.drive;
     // Differential steering: the inside track slows, the outside speeds up.
     // One rule that works for two wheels, four, six, or tracks.
-    const command = clamp(input.drive - input.steer * wheel.side, -1, 1);
+    // Each motor clamps to its own full scale, and the differential is allowed
+    // to exceed the throttle, so at full lock the inside wheels drive backwards
+    // rather than merely coasting.
+    const command = clamp(input.drive - differential * wheel.side, -1, 1);
 
     const axisWorld = rotateVector(wheelAxis(wheel.placement), chassisRotation);
     const angvel = wheel.body.angvel();
@@ -606,6 +644,10 @@ export function driveRobot(robot: RobotHandle, input: ControlInput): void {
       { x: -axisWorld.x * tick, y: -axisWorld.y * tick, z: -axisWorld.z * tick },
       true,
     );
+
+    // The longitudinal grip the collider is not carrying, applied along the
+    // rolling direction so the tyre still bites going forwards.
+    applyTraction(robot, wheel, axisWorld, spin);
 
     stepWheelThermal(wheel, Math.abs(curve) * robot.sag);
   }
@@ -803,6 +845,83 @@ function multiplyQuaternions(a: RAPIER.Rotation, b: RAPIER.Rotation): RAPIER.Rot
     y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x,
     z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w,
   };
+}
+
+/** Is this wheel touching anything it could push against? */
+function grounded(robot: RobotHandle, wheel: WheelRuntime): boolean {
+  if (wheel.body.numColliders() === 0) return false;
+  let touching = false;
+  robot.world.contactPairsWith(wheel.body.collider(0), () => {
+    touching = true;
+  });
+  return touching;
+}
+
+/**
+ * Restores a tyre's longitudinal grip.
+ *
+ * The collider only carries lateral friction, so this supplies the difference
+ * along the direction the wheel actually rolls, capped at what that extra grip
+ * could deliver against the weight the wheel is carrying. The result is a tyre
+ * that accelerates and brakes on its full rated grip while still being able to
+ * slide sideways, which is the whole mechanism by which a machine with no
+ * steered axle turns.
+ */
+function applyTraction(
+  robot: RobotHandle,
+  wheel: WheelRuntime,
+  axisWorld: RAPIER.Vector3,
+  spin: number,
+): void {
+  const spec = wheel.part.drive ?? wheel.part.roller;
+  if (!spec) return;
+
+  const extra = spec.grip - spec.lateralGrip;
+  if (extra <= 0) return;
+
+  // A tyre only grips what it is touching. Applying this unconditionally made
+  // it a thruster: a machine with no ground clearance, sitting on its belly
+  // with every wheel in the air, drove 10.6 m in the test that exists to prove
+  // it cannot move at all.
+  if (!grounded(robot, wheel)) return;
+
+  // Rolling direction: the axle crossed with the surface normal.
+  const roll = {
+    x: axisWorld.y * UP.z - axisWorld.z * UP.y,
+    y: axisWorld.z * UP.x - axisWorld.x * UP.z,
+    z: axisWorld.x * UP.y - axisWorld.y * UP.x,
+  };
+  const length = Math.sqrt(roll.x * roll.x + roll.y * roll.y + roll.z * roll.z);
+  // Degenerate when the wheel is lying flat, at which point it is not rolling.
+  if (length < 1e-4) return;
+  roll.x /= length;
+  roll.y /= length;
+  roll.z /= length;
+
+  // Slip is the gap between how fast the hub is travelling and how fast the
+  // tread is laying down road. Rolling without slipping makes these equal.
+  const velocity = wheel.body.linvel();
+  const along = velocity.x * roll.x + velocity.y * roll.y + velocity.z * roll.z;
+  const slip = along - spin * spec.radius;
+
+  const cap = extra * robot.weightPerContact;
+  const force = clamp(-slip / TYRE_SLIP_REFERENCE, -1, 1) * cap;
+  const tick = force * PHYSICS_DT;
+  wheel.body.applyImpulse({ x: roll.x * tick, y: roll.y * tick, z: roll.z * tick }, true);
+
+  // And the torque that force exerts on the wheel about its own axle.
+  //
+  // Without it this is not friction, it is a rocket: traction turns wheel
+  // rotation into motion, so the tyre has to be slowed by exactly what the
+  // machine gains. Applying only the linear half let the wheels run 32% past
+  // their free speed — 141 rad/s against a rated 107 — and carried SCOUT to
+  // 9.6 m/s against a promised 7.5. The builder is only honest if the
+  // simulation cannot cheat it.
+  const reaction = -force * spec.radius * PHYSICS_DT;
+  wheel.body.applyTorqueImpulse(
+    { x: axisWorld.x * reaction, y: axisWorld.y * reaction, z: axisWorld.z * reaction },
+    true,
+  );
 }
 
 /** Motors above their continuous rating lose torque, and stalling cooks them. */

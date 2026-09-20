@@ -46,7 +46,14 @@ export interface DriveSpec {
   readonly width: number;
   /** Tyre friction coefficient against the arena floor. */
   readonly grip: number;
-  /** Lateral grip as a fraction of forward grip. Omni wheels slide sideways. */
+  /**
+   * Friction coefficient sideways, absolute — not a fraction of `grip`.
+   *
+   * A tyre grips along its roll and scrubs across it, and the gap between the
+   * two is the entire mechanism by which a machine with no steered axle turns.
+   * One of these values used to be 1.2 against a forward grip of 1.6, which is
+   * only coherent read as a coefficient, so that is what it is.
+   */
   readonly lateralGrip: number;
   /** Peak electrical draw at stall, W. */
   readonly peakWatts: number;
@@ -60,6 +67,8 @@ export interface RollerSpec {
   readonly radius: number;
   readonly width: number;
   readonly grip: number;
+  /** As DriveSpec: absolute sideways coefficient. A caster barely resists. */
+  readonly lateralGrip: number;
   readonly steerable: boolean;
 }
 

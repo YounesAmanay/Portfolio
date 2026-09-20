@@ -177,7 +177,7 @@ const DRIVE: PartDef[] = [
     visual: { shape: 'wheel', colour: '#1f242c', emissive: '#4de2ff' },
     drive: {
       wheelTorque: 0.5, freeSpeed: rpmToRad(2230), radius: 0.06, width: 0.04,
-      grip: 1.0, lateralGrip: 0.9, peakWatts: 700, thermalLimit: 0.45, channel: 'DRIVE',
+      grip: 1.0, lateralGrip: 0.40, peakWatts: 700, thermalLimit: 0.45, channel: 'DRIVE',
     },
   },
   {
@@ -193,7 +193,7 @@ const DRIVE: PartDef[] = [
     visual: { shape: 'wheel', colour: '#23282f', emissive: '#4de2ff' },
     drive: {
       wheelTorque: 1.0, freeSpeed: rpmToRad(1023), radius: 0.07, width: 0.045,
-      grip: 1.1, lateralGrip: 0.9, peakWatts: 700, thermalLimit: 0.5, channel: 'DRIVE',
+      grip: 1.1, lateralGrip: 0.45, peakWatts: 700, thermalLimit: 0.5, channel: 'DRIVE',
     },
   },
   {
@@ -209,7 +209,7 @@ const DRIVE: PartDef[] = [
     visual: { shape: 'wheel', colour: '#2a2620', emissive: '#ffab4d' },
     drive: {
       wheelTorque: 2.6, freeSpeed: rpmToRad(335), radius: 0.08, width: 0.055,
-      grip: 1.35, lateralGrip: 0.95, peakWatts: 700, thermalLimit: 0.6, channel: 'DRIVE',
+      grip: 1.35, lateralGrip: 0.55, peakWatts: 700, thermalLimit: 0.6, channel: 'DRIVE',
     },
   },
   {
@@ -225,7 +225,7 @@ const DRIVE: PartDef[] = [
     visual: { shape: 'box', colour: '#1b1e23', emissive: '#ffab4d' },
     drive: {
       wheelTorque: 2.2, freeSpeed: rpmToRad(430), radius: 0.07, width: 0.06,
-      grip: 1.6, lateralGrip: 1.2, peakWatts: 850, thermalLimit: 0.55, channel: 'DRIVE',
+      grip: 1.6, lateralGrip: 0.80, peakWatts: 850, thermalLimit: 0.55, channel: 'DRIVE',
     },
   },
   {
@@ -241,7 +241,7 @@ const DRIVE: PartDef[] = [
     visual: { shape: 'wheel', colour: '#2b3540', emissive: '#d98bff' },
     drive: {
       wheelTorque: 0.7, freeSpeed: rpmToRad(820), radius: 0.065, width: 0.05,
-      grip: 0.85, lateralGrip: 0.25, peakWatts: 620, thermalLimit: 0.45, channel: 'DRIVE',
+      grip: 0.85, lateralGrip: 0.12, peakWatts: 620, thermalLimit: 0.45, channel: 'DRIVE',
     },
   },
 ];
@@ -258,7 +258,7 @@ const ROLLERS: PartDef[] = [
     blurb: 'Free-swivelling support wheel. Carries load, contributes nothing to drive.',
     lesson: 'A third contact point turns a tippy two-wheeler into a stable tricycle for 120 grams.',
     visual: { shape: 'wheel', colour: '#39414c' },
-    roller: { radius: 0.035, width: 0.025, grip: 0.7, steerable: true },
+    roller: { radius: 0.035, width: 0.025, grip: 0.7, lateralGrip: 0.15, steerable: true },
   },
   {
     id: 'wheel.idler',
@@ -271,7 +271,7 @@ const ROLLERS: PartDef[] = [
     blurb: 'Fixed-axis unpowered wheel. Rolls forward, resists sideways.',
     lesson: 'Undriven wheels still carry weight off your drive pods — which changes how much grip those pods have.',
     visual: { shape: 'wheel', colour: '#333a44' },
-    roller: { radius: 0.055, width: 0.03, grip: 0.95, steerable: false },
+    roller: { radius: 0.055, width: 0.03, grip: 0.95, lateralGrip: 0.5, steerable: false },
   },
 ];
 
