@@ -121,7 +121,17 @@ export type PartFinish =
   | 'hardened';
 
 export interface VisualSpec {
-  readonly shape: 'box' | 'cylinder' | 'wheel' | 'disc' | 'rotor' | 'dome' | 'blade';
+  readonly shape:
+    | 'box'
+    | 'cylinder'
+    | 'wheel'
+    | 'disc'
+    | 'rotor'
+    | 'dome'
+    | 'blade'
+    | 'hammer'
+    | 'flipper'
+    | 'duct';
   /** Tints the finish's albedo. */
   readonly colour: string;
   /** Defaults from the part's category and fittings when omitted. */

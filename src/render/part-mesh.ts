@@ -1,15 +1,34 @@
 /**
- * Procedural geometry for components.
+ * The visual for one component.
  *
- * There is no asset pipeline, so every part is built from primitives at load
- * and cached by shape and size. That is a constraint, but it suits the subject:
- * these are machines assembled from stock parts, and stock parts *are* boxes,
- * cylinders and discs. Detail comes from materials, emissive accents and the
- * small chamfers and hubs added below, not from polygon count.
+ * This module is the dispatcher: it picks the right builder from `geometry.ts`
+ * for a part's declared shape, assigns materials from the finish library, and
+ * caches the result by shape and size so a machine with four identical wheels
+ * builds one wheel.
+ *
+ * Sub-parts get their own materials on purpose. A wheel is rubber *and*
+ * machined alloy *and* a lit hub, and one material across all three is most of
+ * what made these read as toys. Anything that is not the part's own substance —
+ * rims, brackets, pivots, vents — comes from the shared detail metals below,
+ * which keeps the material count flat as the library grows.
  */
 
 import * as THREE from 'three';
 import type { PartDef } from '../kinetic/parts/types';
+import {
+  bladeDisc,
+  cannedCylinder,
+  chamferedBox,
+  ductParts,
+  flipperParts,
+  hammerParts,
+  rimGeometry,
+  rotorParts,
+  spinnerBar,
+  treadLugs,
+  tyre,
+  vents,
+} from './geometry';
 import { disposeMaterials, finishFor, finishMaterial } from './materials';
 
 const geometryCache = new Map<string, THREE.BufferGeometry>();
@@ -24,21 +43,18 @@ function cachedGeometry(key: string, build: () => THREE.BufferGeometry): THREE.B
   return geometry;
 }
 
+// ── materials ──────────────────────────────────────────────────────────────
+
 /**
- * The material for a part.
+ * The part's own substance.
  *
- * Solid parts come from the finish library, which owns the surface maps and
- * the physical constants. The ghost is deliberately untextured: it is a
- * placement preview, and panel lines on a translucent overlay read as dirt.
+ * No emissive here. `visual.emissive` is an accent colour, and applying it
+ * across the body made every tyre glow cyan instead of being black rubber —
+ * a surface lit from within cannot read as a material at all. The lamps and
+ * stripes below carry it instead.
  */
 export function partMaterial(part: PartDef, opts: { ghost?: boolean } = {}): THREE.Material {
-  if (!opts.ghost) {
-    // No emissive on the body. `visual.emissive` is an *accent* colour, and
-    // applying it to the whole part made every tyre glow cyan instead of being
-    // black rubber — a part lit from within cannot read as a material at all.
-    // The accent geometry below (hubs, stripes) is what carries it.
-    return finishMaterial(finishFor(part), { tint: part.visual.colour });
-  }
+  if (opts.ghost !== true) return finishMaterial(finishFor(part), { tint: part.visual.colour });
 
   const key = `${part.id}|ghost`;
   const cached = materialCache.get(key);
@@ -59,15 +75,19 @@ export function partMaterial(part: PartDef, opts: { ghost?: boolean } = {}): THR
 }
 
 /**
- * Dark machined detail: hubs, brackets, anything that is not the part itself.
+ * Shared detail metals, built on first use.
  *
- * Built on first use rather than at module load. Generating a material draws
- * its texture maps on a canvas, so doing it at import time makes this module
- * impossible to import anywhere without a DOM — which broke the workshop's
- * raycast tests, none of which render anything.
+ * Lazily, because generating a material draws its texture maps on a canvas —
+ * doing that at module scope makes this file unimportable without a DOM, which
+ * broke the workshop's raycast tests. None of those render anything.
  */
-function accentMaterial(): THREE.Material {
-  return finishMaterial('steel', { tint: '#4a5260' });
+const brightMetal = (): THREE.Material => finishMaterial('alloy', { tint: '#9aa6b8' });
+const darkMetal = (): THREE.Material => finishMaterial('steel', { tint: '#454d5a' });
+const weaponMetal = (): THREE.Material => finishMaterial('hardened', { tint: '#b9bec8' });
+
+/** An indicator lamp. Pushed above 1.0 so it survives tone mapping and blooms. */
+function lamp(colour: string, intensity = 2.2): THREE.Material {
+  return finishMaterial('polymer', { tint: colour, emissive: colour, emissiveIntensity: intensity });
 }
 
 export interface MeshSize {
@@ -76,165 +96,159 @@ export interface MeshSize {
   readonly z: number;
 }
 
+function add(group: THREE.Group, geometry: THREE.BufferGeometry, material: THREE.Material): THREE.Mesh {
+  const mesh = new THREE.Mesh(geometry, material);
+  group.add(mesh);
+  return mesh;
+}
+
 /**
  * Builds the visual for one part at a given size in metres.
  *
  * Wheels and discs ignore the footprint's minor axis and use the part's own
  * radius, so a 140 mm tyre looks like a 140 mm tyre rather than being stretched
- * to fill its lattice box.
+ * to fill its lattice box — and, more to the point, looks like the radius the
+ * simulation is actually integrating.
  */
 export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boolean } = {}): THREE.Group {
   const group = new THREE.Group();
-  const material = partMaterial(part, opts);
-  const shape = part.visual.shape;
+  const ghost = opts.ghost === true;
+  const body = partMaterial(part, opts);
+  // A ghost is a placement preview: one flat translucent colour throughout,
+  // because picking out its rims and vents only makes it harder to read.
+  const detail = ghost ? body : brightMetal();
+  const dark = ghost ? body : darkMetal();
+  const weapon = ghost ? body : weaponMetal();
+  const key = `${size.x.toFixed(3)}:${size.y.toFixed(3)}:${size.z.toFixed(3)}`;
 
-  switch (shape) {
+  switch (part.visual.shape) {
     case 'wheel': {
       const radius = part.drive?.radius ?? part.roller?.radius ?? Math.min(size.x, size.y) / 2;
       const width = part.drive?.width ?? part.roller?.width ?? size.z * 0.6;
+      const driven = part.drive !== undefined;
+      const id = `${radius.toFixed(3)}:${width.toFixed(3)}`;
 
-      const tyre = new THREE.Mesh(
-        cachedGeometry(`tyre:${radius}:${width}`, () => {
-          const g = new THREE.CylinderGeometry(radius, radius, width, 32, 1);
-          g.rotateZ(Math.PI / 2);
-          return g;
-        }),
-        material,
-      );
-      group.add(tyre);
+      add(group, cachedGeometry(`tyre:${id}`, () => tyre(radius, width)), body);
+      add(group, cachedGeometry(`lugs:${id}`, () => treadLugs(radius, width, 18)), body);
+      add(group, cachedGeometry(`rim:${id}:${driven}`, () => rimGeometry({ radius, width, driven })), detail);
 
-      // A bright hub reads as "this one is powered" at a glance.
-      const hub = new THREE.Mesh(
-        cachedGeometry(`hub:${radius}:${width}`, () => {
-          const g = new THREE.CylinderGeometry(radius * 0.42, radius * 0.42, width * 1.06, 16, 1);
-          g.rotateZ(Math.PI / 2);
-          return g;
-        }),
-        part.drive ? partMaterial(part, opts) : accentMaterial(),
-      );
-      if (part.drive && part.visual.emissive) {
-        hub.material = finishMaterial('alloy', {
-          tint: part.visual.emissive,
-          emissive: part.visual.emissive,
-          emissiveIntensity: 1.1,
-        });
+      if (driven && part.visual.emissive !== undefined && !ghost) {
+        const ring = add(
+          group,
+          cachedGeometry(`wlamp:${id}`, () => {
+            const g = new THREE.TorusGeometry(radius * 0.3, radius * 0.05, 8, 20);
+            g.rotateY(Math.PI / 2);
+            return g;
+          }),
+          lamp(part.visual.emissive, 1.8),
+        );
+        ring.position.x = width * 0.36;
       }
-      group.add(hub);
       break;
     }
 
     case 'disc': {
       const radius = Math.max(size.x, size.z) / 2;
-      const disc = new THREE.Mesh(
-        cachedGeometry(`disc:${radius}`, () => {
-          const g = new THREE.CylinderGeometry(radius, radius, radius * 0.16, 28, 1);
-          return g;
-        }),
-        material,
+      const teeth = part.weapon?.kind === 'SAW' ? 14 : 8;
+      add(
+        group,
+        cachedGeometry(`disc:${radius.toFixed(3)}:${teeth}`, () => bladeDisc(radius, radius * 0.18, teeth)),
+        weapon,
       );
-      group.add(disc);
-      // Teeth, so a spinner reads as dangerous rather than decorative.
-      for (let i = 0; i < 3; i++) {
-        const tooth = new THREE.Mesh(
-          cachedGeometry(`tooth:${radius}`, () => new THREE.BoxGeometry(radius * 0.3, radius * 0.22, radius * 0.3)),
-          material,
-        );
-        const angle = (i / 3) * Math.PI * 2;
-        tooth.position.set(Math.cos(angle) * radius * 0.92, 0, Math.sin(angle) * radius * 0.92);
-        tooth.rotation.y = -angle;
-        group.add(tooth);
-      }
+      add(
+        group,
+        cachedGeometry(`dhub:${radius.toFixed(3)}`, () =>
+          new THREE.CylinderGeometry(radius * 0.22, radius * 0.22, radius * 0.34, 16),
+        ),
+        detail,
+      );
       break;
     }
 
     case 'blade': {
-      const bar = new THREE.Mesh(
-        cachedGeometry(`blade:${size.x}:${size.z}`, () =>
-          new THREE.BoxGeometry(size.x, size.y * 0.8, size.z * 0.42),
+      add(group, cachedGeometry(`bar:${key}`, () => spinnerBar(size.x, size.y, size.z * 0.42)), weapon);
+      add(
+        group,
+        cachedGeometry(`bhub:${key}`, () =>
+          new THREE.CylinderGeometry(size.y * 0.32, size.y * 0.32, size.z * 0.62, 16),
         ),
-        material,
+        detail,
       );
-      group.add(bar);
-      for (const end of [-1, 1]) {
-        const tip = new THREE.Mesh(
-          cachedGeometry(`tip:${size.z}`, () => new THREE.BoxGeometry(size.x * 0.12, size.y, size.z * 0.6)),
-          material,
-        );
-        tip.position.x = (end * size.x) / 2.3;
-        group.add(tip);
-      }
+      break;
+    }
+
+    case 'hammer': {
+      add(group, cachedGeometry(`ham.pivot:${key}`, () => hammerParts(size).pivot), detail);
+      add(group, cachedGeometry(`ham.arm:${key}`, () => hammerParts(size).arm), dark);
+      add(group, cachedGeometry(`ham.head:${key}`, () => hammerParts(size).head), weapon);
+      break;
+    }
+
+    case 'flipper': {
+      add(group, cachedGeometry(`flip.plate:${key}`, () => flipperParts(size).plate), body);
+      add(group, cachedGeometry(`flip.ram:${key}`, () => flipperParts(size).ram), detail);
       break;
     }
 
     case 'rotor': {
       const radius = Math.max(size.x, size.z) / 2;
-      const hub = new THREE.Mesh(
-        cachedGeometry(`rhub:${radius}`, () => new THREE.CylinderGeometry(radius * 0.18, radius * 0.22, size.y, 12)),
-        material,
-      );
-      group.add(hub);
-      for (let i = 0; i < 2; i++) {
-        const blade = new THREE.Mesh(
-          cachedGeometry(`rblade:${radius}`, () => {
-            const g = new THREE.BoxGeometry(radius * 1.9, size.y * 0.16, radius * 0.24);
-            return g;
-          }),
-          material,
-        );
-        blade.rotation.y = (i / 2) * Math.PI;
-        blade.rotation.z = 0.18;
-        group.add(blade);
-      }
+      const id = `${radius.toFixed(3)}:${size.y.toFixed(3)}`;
+      add(group, cachedGeometry(`rot.hub:${id}`, () => rotorParts(radius, size.y).hub), detail);
+      add(group, cachedGeometry(`rot.blades:${id}`, () => rotorParts(radius, size.y).blades), dark);
+      break;
+    }
+
+    case 'duct': {
+      const radius = Math.min(size.x, size.z) / 2;
+      const id = `${radius.toFixed(3)}:${size.y.toFixed(3)}`;
+      add(group, cachedGeometry(`duct.shroud:${id}`, () => ductParts(radius, size.y).shroud), body);
+      add(group, cachedGeometry(`duct.vanes:${id}`, () => ductParts(radius, size.y).vanes), detail);
       break;
     }
 
     case 'cylinder': {
       const radius = Math.min(size.x, size.z) / 2;
-      group.add(
-        new THREE.Mesh(
-          cachedGeometry(`cyl:${radius}:${size.y}`, () => new THREE.CylinderGeometry(radius, radius, size.y, 20)),
-          material,
-        ),
-      );
+      const id = `${radius.toFixed(3)}:${size.y.toFixed(3)}`;
+      add(group, cachedGeometry(`can.body:${id}`, () => cannedCylinder(radius, size.y).body), body);
+      add(group, cachedGeometry(`can.rings:${id}`, () => cannedCylinder(radius, size.y).rings), detail);
       break;
     }
 
     case 'dome': {
       const radius = Math.min(size.x, size.z) / 2;
-      group.add(
-        new THREE.Mesh(
-          cachedGeometry(`dome:${radius}`, () => new THREE.SphereGeometry(radius, 20, 12, 0, Math.PI * 2, 0, Math.PI / 2)),
-          material,
+      add(
+        group,
+        cachedGeometry(`dome:${radius.toFixed(3)}`, () =>
+          new THREE.SphereGeometry(radius, 24, 14, 0, Math.PI * 2, 0, Math.PI / 2),
         ),
+        body,
       );
       break;
     }
 
     case 'box':
     default: {
-      const body = new THREE.Mesh(
-        cachedGeometry(`box:${size.x}:${size.y}:${size.z}`, () => new THREE.BoxGeometry(size.x, size.y, size.z)),
-        material,
-      );
-      group.add(body);
+      add(group, cachedGeometry(`box:${key}`, () => chamferedBox(size.x, size.y, size.z)), body);
 
-      // A thin emissive stripe along the long axis: enough to tell powered
-      // components apart from dumb structure without modelling detail.
-      if (part.visual.emissive && !opts.ghost) {
-        const stripe = new THREE.Mesh(
-          cachedGeometry(`stripe:${size.x}:${size.z}`, () =>
-            new THREE.BoxGeometry(size.x * 0.7, size.y * 0.08, size.z * 0.14),
-          ),
-          // Deliberately over 1.0 so it survives tone mapping as a light source
-          // and gives the bloom pass something real to pick up.
-          new THREE.MeshStandardMaterial({
-            color: new THREE.Color(part.visual.emissive),
-            emissive: new THREE.Color(part.visual.emissive),
-            emissiveIntensity: 2.4,
-          }),
+      // Powered housings get louvres and an indicator. Dumb structure does not:
+      // a ballast weight with cooling vents in it would be a lie.
+      const powered = part.battery !== undefined || part.controller !== undefined;
+      if (powered && !ghost) {
+        const louvres = add(
+          group,
+          cachedGeometry(`vents:${key}`, () => vents(size.x * 0.52, size.z * 0.62, 4)),
+          dark,
         );
-        stripe.position.y = size.y / 2 + 0.001;
-        group.add(stripe);
+        louvres.position.y = size.y / 2;
+      }
+
+      if (part.visual.emissive !== undefined && !ghost) {
+        const stripe = add(
+          group,
+          cachedGeometry(`stripe:${key}`, () => chamferedBox(size.x * 0.62, size.y * 0.06, size.z * 0.1)),
+          lamp(part.visual.emissive),
+        );
+        stripe.position.set(0, size.y / 2 + 0.0015, -size.z * 0.26);
       }
       break;
     }
@@ -242,8 +256,8 @@ export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boo
 
   for (const child of group.children) {
     if (child instanceof THREE.Mesh) {
-      child.castShadow = !opts.ghost;
-      child.receiveShadow = !opts.ghost;
+      child.castShadow = !ghost;
+      child.receiveShadow = !ghost;
     }
   }
   return group;

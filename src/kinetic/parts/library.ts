@@ -303,7 +303,7 @@ const THRUST: PartDef[] = [
     cost: 130,
     blurb: 'Shrouded high-RPM impeller. Compact and loud, and it drinks power.',
     lesson: '14 N for 420 W — half the efficiency of a rotor, in a third of the space.',
-    visual: { shape: 'cylinder', colour: '#242b35', emissive: '#4de2ff' },
+    visual: { shape: 'duct', colour: '#242b35', emissive: '#4de2ff' },
     thruster: { thrust: 14, peakWatts: 420, channel: 'LIFT' },
   },
 ];
@@ -349,7 +349,7 @@ const WEAPONS: PartDef[] = [
     cost: 230,
     blurb: 'CO₂ ram under a hinged wedge. One violent shove, then a long reload.',
     lesson: 'Does almost no damage. Wins by putting the other machine on its back, where its wheels are useless.',
-    visual: { shape: 'box', colour: '#8a6a3a', emissive: '#ffab4d' },
+    visual: { shape: 'flipper', colour: '#8a6a3a', emissive: '#ffab4d' },
     weapon: { kind: 'FLIPPER', drive: 900, peakWatts: 300, reach: 0.22, channel: 'WEAPON' },
   },
   {
@@ -362,7 +362,7 @@ const WEAPONS: PartDef[] = [
     cost: 210,
     blurb: 'Weighted head on a powered arm. Hits downward, where armour is usually thinnest.',
     lesson: 'Concentrates its energy on a small area instead of spreading it — armour thickness matters more than total integrity.',
-    visual: { shape: 'box', colour: '#5a5f68', emissive: '#ff5c6a' },
+    visual: { shape: 'hammer', colour: '#5a5f68', emissive: '#ff5c6a' },
     weapon: { kind: 'HAMMER', drive: 420, peakWatts: 700, reach: 0.3, channel: 'WEAPON' },
   },
   {

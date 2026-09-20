@@ -22,7 +22,11 @@ export interface OrbitLimits {
 }
 
 const DEFAULT_LIMITS: OrbitLimits = {
-  minDistance: 1.6,
+  // 22 cm. A machine is 30-60 cm across and a single component is 8, so the
+  // old 1.6 m floor meant the camera physically could not get close enough to
+  // look at what you had built: you could place a wheel but never see its
+  // tread. The near plane is 0.05, so this still leaves plenty of room.
+  minDistance: 0.22,
   maxDistance: 46,
   // Never quite reach the poles: straight down loses all sense of scale, and
   // straight along the floor puts the camera inside it.

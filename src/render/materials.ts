@@ -118,8 +118,10 @@ const FINISHES: Record<Finish, FinishSpec> = {
     draw: (seed) => {
       const base = panel(seed, { wear: 1.2, boltRadius: 7, brushCount: 800 });
       const ctx = base.albedo.getContext('2d');
-      // Hazard diagonals: this is the end that hurts.
-      if (ctx) hazard(ctx, 26, 0.3);
+      // Hazard diagonals: this is the end that hurts. Wide and faint — at 26px
+      // and 0.3 they covered the whole head and read as upholstery rather than
+      // as a marking on machined steel.
+      if (ctx) hazard(ctx, 48, 0.16);
       return base;
     },
   },
