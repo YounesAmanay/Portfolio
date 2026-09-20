@@ -63,9 +63,36 @@ export const neutralInput = (): ControlInput => ({
   drive: 0, steer: 0, lift: 0, weapon: 0, aux1: 0, aux2: 0,
 });
 
+/**
+ * Everything the simulation needs to know about one rolling contact.
+ *
+ * The simulation reads this and nothing else — never a part, never a
+ * component. That is what lets the same physics drive a machine assembled
+ * under either model, and it is the seam the solver plugs into: a SolvedWheel
+ * is exactly these numbers, derived from a real chain rather than typed into a
+ * part file.
+ *
+ * An undriven roller is the same shape with `driven` false and no torque.
+ */
+export interface DriveSpec {
+  readonly driven: boolean;
+  readonly radius: number;
+  readonly width: number;
+  readonly grip: number;
+  readonly lateralGrip: number;
+  /** Torque at the contact patch at zero speed, N·m. */
+  readonly wheelTorque: number;
+  /** Wheel speed with nothing loading it, rad/s. */
+  readonly freeSpeed: number;
+  /** Peak electrical draw of whatever turns it, watts. */
+  readonly peakWatts: number;
+}
+
 export interface WheelRuntime {
   readonly placement: Placement;
   readonly part: PartDef;
+  /** What this contact does. The only drivetrain numbers the simulation reads. */
+  readonly spec: DriveSpec;
   readonly body: RAPIER.RigidBody;
   readonly joint: RAPIER.ImpulseJoint;
   /** -1 for the left side of the machine, +1 for the right. */
@@ -77,6 +104,37 @@ export interface WheelRuntime {
   /** Motor winding temperature, °C. */
   temperature: number;
   attached: boolean;
+}
+
+/** The part model's view of a contact, for as long as that model ships. */
+function specOfPart(part: PartDef): DriveSpec | null {
+  const drive = part.drive;
+  if (drive) {
+    return {
+      driven: true,
+      radius: drive.radius,
+      width: drive.width,
+      grip: drive.grip,
+      lateralGrip: drive.lateralGrip,
+      wheelTorque: drive.wheelTorque,
+      freeSpeed: drive.freeSpeed,
+      peakWatts: drive.peakWatts,
+    };
+  }
+  const roller = part.roller;
+  if (roller) {
+    return {
+      driven: false,
+      radius: roller.radius,
+      width: roller.width,
+      grip: roller.grip,
+      lateralGrip: roller.lateralGrip,
+      wheelTorque: 0,
+      freeSpeed: 0,
+      peakWatts: 0,
+    };
+  }
+  return null;
 }
 
 /** Where an arm weapon is in its cycle. */
@@ -320,7 +378,7 @@ export function spawnRobot(
     const state: PartState = { placement, part, integrity: part.integrity, attached: true, colliderHandle: null };
     parts.set(placement.uid, state);
 
-    const spec = part.drive ?? part.roller;
+    const spec = specOfPart(part);
     if (spec) {
       // ── rolling contacts: own body, joined by a free hinge ──────────────
       //
@@ -386,12 +444,12 @@ export function spawnRobot(
         );
 
         wheels.push({
-          placement, part, body: wheelBody, joint,
+          placement, part, spec, body: wheelBody, joint,
           side: Math.sign(contactLocal.x) || 1,
           // Torque is split across a unit's contacts so total output is
           // unchanged whether it rolls on one wheel or a whole track.
           torqueShare: 1 / contacts.length,
-          damping: part.drive ? part.drive.wheelTorque / Math.max(1, part.drive.freeSpeed) : 0.02,
+          damping: spec.driven ? spec.wheelTorque / Math.max(1, spec.freeSpeed) : 0.02,
           temperature: AMBIENT_C,
           attached: true,
         });
@@ -571,9 +629,9 @@ export function driveRobot(robot: RobotHandle, input: ControlInput): void {
   // ── 1. demand ─────────────────────────────────────────────────────────────
   let demand = 0;
   for (const wheel of robot.wheels) {
-    if (!wheel.attached || !wheel.part.drive) continue;
+    if (!wheel.attached || !wheel.spec.driven) continue;
     const throttle = Math.abs(clamp(input.drive, -1, 1)) + Math.abs(clamp(input.steer, -1, 1)) * 0.6;
-    demand += wheel.part.drive.peakWatts * wheel.torqueShare * clamp01(throttle);
+    demand += wheel.spec.peakWatts * wheel.torqueShare * clamp01(throttle);
   }
   for (const thruster of robot.thrusters) {
     if (thruster.attached && thruster.part.thruster) demand += thruster.part.thruster.peakWatts * clamp01(input.lift);
@@ -611,9 +669,9 @@ export function driveRobot(robot: RobotHandle, input: ControlInput): void {
   const differential = clamp((wantedYaw - yawRate) * YAW_GAIN, -MAX_DIFFERENTIAL, MAX_DIFFERENTIAL);
 
   for (const wheel of robot.wheels) {
-    if (!wheel.attached || !wheel.part.drive) continue;
+    if (!wheel.attached || !wheel.spec.driven) continue;
 
-    const spec = wheel.part.drive;
+    const spec = wheel.spec;
     // Differential steering: the inside track slows, the outside speeds up.
     // One rule that works for two wheels, four, six, or tracks.
     // Each motor clamps to its own full scale, and the differential is allowed
@@ -873,9 +931,7 @@ function applyTraction(
   axisWorld: RAPIER.Vector3,
   spin: number,
 ): void {
-  const spec = wheel.part.drive ?? wheel.part.roller;
-  if (!spec) return;
-
+  const spec = wheel.spec;
   const extra = spec.grip - spec.lateralGrip;
   if (extra <= 0) return;
 
@@ -926,8 +982,8 @@ function applyTraction(
 
 /** Motors above their continuous rating lose torque, and stalling cooks them. */
 function stepWheelThermal(wheel: WheelRuntime, load: number): void {
-  const spec = wheel.part.drive;
-  if (!spec) return;
+  const spec = wheel.spec;
+  if (!spec.driven) return;
   const speed = Math.abs(wheel.body.angvel().x) + Math.abs(wheel.body.angvel().z);
   // Stalled motors heat hardest: current, and therefore heat, peaks at zero RPM.
   const stallFactor = 1 - clamp01(speed / Math.max(1, spec.freeSpeed));

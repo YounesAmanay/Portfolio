@@ -702,6 +702,183 @@ const UTILITY: ComponentDef[] = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
+// WEAPONS — a lump of steel on a shaft, and an arm on a pivot
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Note what these do not carry: no damage, no energy, no spin rate. A spinner
+// is inertia and a radius, and what it does depends entirely on the motor and
+// gearbox behind it — the same chain a wheel hangs off, solved the same way.
+// Under the old model a weapon arrived with its energy already decided, so the
+// most interesting decision on the machine (how hard to gear something that
+// has to reach speed before contact) did not exist.
+
+const WEAPONS: ComponentDef[] = [
+  {
+    id: 'wpn.eggbeater',
+    name: 'Eggbeater Drum',
+    category: 'WEAPON',
+    footprint: { x: 2, y: 2, z: 2 },
+    mass: 0.35,
+    integrity: 900,
+    cost: 120,
+    blurb: 'A small hardened drum on a horizontal axis. Reaches speed in a second and bites upward.',
+    lesson: 'Low inertia is a weapon you can use all match. It never hits as hard, and it is always ready.',
+    visual: { shape: 'disc', colour: '#5d646d', finish: 'hardened' },
+    ports: [port('in', 'shaft', 'in', 'Drive')],
+    spinner: { kind: 'DRUM', inertia: 0.0012, reach: 0.05, teeth: 2 },
+  },
+  {
+    id: 'wpn.bar',
+    name: 'Spinning Bar',
+    category: 'WEAPON',
+    footprint: { x: 5, y: 1, z: 1 },
+    mass: 0.9,
+    integrity: 1600,
+    cost: 210,
+    blurb: '400 mm of hardened bar across the machine. All the mass at the ends, where it counts.',
+    lesson: 'Inertia goes as radius squared. The same kilogram twice as far out stores four times the energy.',
+    visual: { shape: 'blade', colour: '#6b7480', finish: 'hardened' },
+    ports: [port('in', 'shaft', 'in', 'Drive')],
+    spinner: { kind: 'BAR', inertia: 0.011, reach: 0.2, teeth: 2 },
+  },
+  {
+    id: 'wpn.drum',
+    name: 'Hardened Drum',
+    category: 'WEAPON',
+    footprint: { x: 4, y: 2, z: 2 },
+    mass: 1.4,
+    integrity: 3200,
+    cost: 280,
+    blurb: 'A wide thick-walled drum. Four teeth, so it lands a hit on nearly any approach.',
+    lesson: 'More teeth means more chances to connect and less energy in each. Drums grind; discs detonate.',
+    visual: { shape: 'disc', colour: '#5d646d', finish: 'hardened' },
+    ports: [port('in', 'shaft', 'in', 'Drive')],
+    spinner: { kind: 'DRUM', inertia: 0.006, reach: 0.06, teeth: 4 },
+  },
+  {
+    id: 'wpn.disc',
+    name: 'Steel Disc',
+    category: 'WEAPON',
+    footprint: { x: 3, y: 3, z: 1 },
+    mass: 2.4,
+    integrity: 3800,
+    cost: 340,
+    blurb: '260 mm of tool steel with the mass at the rim. Takes a while to wind up and then it is terrifying.',
+    lesson: 'Energy you have to spend eight seconds building is a decision made before contact, not during it.',
+    visual: { shape: 'disc', colour: '#4f565f', finish: 'hardened' },
+    ports: [port('in', 'shaft', 'in', 'Drive')],
+    spinner: { kind: 'DISC', inertia: 0.028, reach: 0.13, teeth: 3 },
+  },
+  {
+    id: 'wpn.hammer',
+    name: 'Hammer Arm',
+    category: 'WEAPON',
+    footprint: { x: 1, y: 3, z: 4 },
+    mass: 1.1,
+    integrity: 2400,
+    cost: 260,
+    blurb: 'A pivoted arm with a hardened head and a 32 mm ram at its root. Comes down rather than around.',
+    lesson: 'An arm is ready the instant it resets. A spinner has to be spun up before it is worth anything.',
+    visual: { shape: 'hammer', colour: '#6b7480', finish: 'hardened' },
+    ports: [port('gas', 'gas', 'in', 'Gas')],
+    arm: { kind: 'HAMMER', reach: 0.22, inertia: 0.05, forceRating: 1000 },
+    ram: { bore: 0.0008, stroke: 0.12, displacement: 0.096 },
+  },
+  {
+    id: 'wpn.flipper',
+    name: 'Flipper Plate',
+    category: 'WEAPON',
+    footprint: { x: 3, y: 1, z: 4 },
+    mass: 1.6,
+    integrity: 3000,
+    cost: 320,
+    blurb: 'A wedge plate on a 50 mm ram. Gets under a machine and puts it on its back, which ends most fights.',
+    lesson: 'A flipper does no damage at all. It wins by making the other machine useless, which is enough.',
+    visual: { shape: 'flipper', colour: '#7f8b9c', finish: 'steel' },
+    ports: [port('gas', 'gas', 'in', 'Gas')],
+    arm: { kind: 'FLIPPER', reach: 0.3, inertia: 0.09, forceRating: 6000 },
+    ram: { bore: 0.002, stroke: 0.15, displacement: 0.3 },
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PNEUMATICS — the third chain, and the shortest
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PNEUMATICS: ComponentDef[] = [
+  {
+    id: 'gas.co2s',
+    name: '3.5 oz CO2 Bottle',
+    category: 'UTILITY',
+    footprint: { x: 1, y: 1, z: 3 },
+    mass: 0.24,
+    integrity: 600,
+    cost: 40,
+    blurb: 'Liquid CO2 at its own vapour pressure. About fifty litres of gas once it has boiled off.',
+    lesson: 'CO2 sits at 55 bar whatever you do, and it freezes the regulator if you fire too fast.',
+    visual: { shape: 'cylinder', colour: '#9aa6b5', finish: 'alloy' },
+    ports: [port('out', 'gas', 'out', 'Outlet')],
+    gas: { litres: 50, bar: 55 },
+  },
+  {
+    id: 'gas.co2',
+    name: '9 oz CO2 Bottle',
+    category: 'UTILITY',
+    footprint: { x: 2, y: 2, z: 3 },
+    mass: 0.55,
+    integrity: 900,
+    cost: 70,
+    blurb: 'The standard bottle. A hundred and forty litres, and more shots than a match has room for.',
+    lesson: 'Gas is cheap and the bottle is not light. Carry the shots you will use, not the ones you might.',
+    visual: { shape: 'cylinder', colour: '#9aa6b5', finish: 'alloy' },
+    ports: [port('out', 'gas', 'out', 'Outlet')],
+    gas: { litres: 140, bar: 55 },
+  },
+  {
+    id: 'gas.hpa',
+    name: 'HPA Bottle',
+    category: 'UTILITY',
+    footprint: { x: 2, y: 2, z: 4 },
+    mass: 1.3,
+    integrity: 1600,
+    cost: 190,
+    blurb: '13 cubic inches of air at 200 bar. Heavier than CO2, and it does not freeze when you empty it.',
+    lesson: 'Compressed air gives up nothing to temperature. It costs you a kilogram to stop caring.',
+    visual: { shape: 'cylinder', colour: '#43505c', finish: 'steel' },
+    ports: [port('out', 'gas', 'out', 'Outlet')],
+    gas: { litres: 380, bar: 200 },
+  },
+  {
+    id: 'gas.reg8',
+    name: '8 bar Regulator',
+    category: 'UTILITY',
+    footprint: { x: 1, y: 1, z: 1 },
+    mass: 0.18,
+    integrity: 400,
+    cost: 60,
+    blurb: 'Steps the bottle down to eight bar. Gentle on the ram and generous with the shot count.',
+    lesson: 'Pressure is the trade: harder hits or more of them. The regulator is where you choose.',
+    visual: { shape: 'cylinder', colour: '#b8bec7', finish: 'alloy' },
+    ports: [port('in', 'gas', 'in', 'Inlet'), port('out', 'gas', 'out', 'Outlet')],
+    regulator: { bar: 8 },
+  },
+  {
+    id: 'gas.reg14',
+    name: '14 bar Regulator',
+    category: 'UTILITY',
+    footprint: { x: 1, y: 1, z: 2 },
+    mass: 0.22,
+    integrity: 400,
+    cost: 85,
+    blurb: 'Fourteen bar. Nearly twice the force, and the arm has to be rated to take it.',
+    lesson: 'The regulator cannot be turned above what the arm survives. Check the rating before the bottle.',
+    visual: { shape: 'cylinder', colour: '#b8bec7', finish: 'alloy' },
+    ports: [port('in', 'gas', 'in', 'Inlet'), port('out', 'gas', 'out', 'Outlet')],
+    regulator: { bar: 14 },
+  },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 export const ALL_COMPONENTS: readonly ComponentDef[] = [
   ...STRUCTURE,
@@ -712,6 +889,8 @@ export const ALL_COMPONENTS: readonly ComponentDef[] = [
   ...WHEELS,
   ...POWER,
   ...CONTROL,
+  ...WEAPONS,
+  ...PNEUMATICS,
   ...UTILITY,
 ];
 

@@ -15,11 +15,15 @@
  */
 
 import {
+  armTorque,
   freeSpeed,
   gearboxEfficiency,
   packCurrent,
   packEnergy,
   packVoltage,
+  shotsAvailable,
+  spinUpTime,
+  spinnerEnergy,
   stallCurrent,
   stallTorque,
   type ComponentDef,
@@ -78,8 +82,54 @@ export interface SolvedWheel {
   readonly peakAmps: number;
 }
 
+/**
+ * What one spinning weapon ends up doing.
+ *
+ * A spinner is a wheel that never touches the ground: the same motor, the same
+ * gearbox, the same chain, and the same solve. What differs is which numbers
+ * matter — a wheel cares about torque at the patch, a spinner cares about how
+ * long it takes to get to speed and how much energy it holds when it arrives.
+ */
+export interface SolvedSpinner {
+  readonly uid: string;
+  readonly component: ComponentDef;
+  readonly driven: boolean;
+  /** Torque at the weapon shaft, N·m. */
+  readonly torque: number;
+  /** Rate with nothing loading it, rad/s. */
+  readonly freeSpeed: number;
+  readonly inertia: number;
+  readonly reach: number;
+  readonly teeth: number;
+  /** Seconds to reach nine tenths of free speed. */
+  readonly spinUp: number;
+  /** Kinetic energy at free speed, joules. */
+  readonly energy: number;
+  /** Speed of the striking edge at free speed, m/s. */
+  readonly tipSpeed: number;
+  readonly peakAmps: number;
+}
+
+/** What one arm weapon ends up doing. */
+export interface SolvedArm {
+  readonly uid: string;
+  readonly component: ComponentDef;
+  readonly armed: boolean;
+  readonly kind: 'HAMMER' | 'FLIPPER';
+  /** Torque about the pivot, N·m. */
+  readonly torque: number;
+  readonly reach: number;
+  readonly inertia: number;
+  /** Regulated pressure it fires at, bar. */
+  readonly bar: number;
+  /** Firings before the bottle is empty. */
+  readonly shots: number;
+}
+
 export interface Solution {
   readonly wheels: readonly SolvedWheel[];
+  readonly spinners: readonly SolvedSpinner[];
+  readonly arms: readonly SolvedArm[];
   readonly faults: readonly Fault[];
   /** Supply voltage, or 0 with no pack. */
   readonly volts: number;
@@ -158,9 +208,30 @@ function findUpstream(
 
 // ── the solve ──────────────────────────────────────────────────────────────
 
+/** What a shaft chain delivers at its far end. */
+interface Driven {
+  readonly torque: number;
+  readonly speed: number;
+  readonly amps: number;
+}
+
 export function solve(machine: Machine): Solution {
   const graph = buildGraph(machine);
   const faults: Fault[] = [];
+
+  // One motor can turn several things, so the same chain gets walked more than
+  // once and would report the same fault each time. Faults are deduplicated as
+  // they are raised: a player reading "this gearbox will strip" four times
+  // learns nothing they did not learn the first time.
+  const seenFaults = new Set<string>();
+  const note = (fault: Fault): void => {
+    const key = `${fault.severity}|${fault.uid ?? ''}|${fault.message}`;
+    if (seenFaults.has(key)) return;
+    seenFaults.add(key);
+    faults.push(fault);
+  };
+
+  const isWheel = (uid: string): boolean => graph.byUid.get(uid)?.component.wheel !== undefined;
 
   const mass = machine.installed.reduce((total, i) => total + i.component.mass, 0);
   const fuel = machine.installed.reduce((total, i) => total + (i.component.tank?.litres ?? 0), 0);
@@ -173,11 +244,144 @@ export function solve(machine: Machine): Solution {
 
   const cells = packs.reduce((highest, i) => Math.max(highest, i.component.pack!.cells), 0);
 
-  // ── every wheel, driven or not ──────────────────────────────────────────
-  const wheels: SolvedWheel[] = [];
+  // ── every shaft-driven thing ────────────────────────────────────────────
+  //
+  // A wheel and a spinner are the same solve. Both hang off a chain that ends
+  // at a motor or an engine, and the only difference is which numbers you want
+  // out of the far end — torque at the contact patch, or how long the disc
+  // takes to reach speed. Walking that chain once, here, is what keeps them
+  // from drifting apart.
   const counted = new Set<string>();
   let demandAmps = 0;
 
+  const traceShaft = (targetUid: string): Driven | null => {
+    const source = findUpstream(
+      graph,
+      targetUid,
+      (i) => i.component.motor !== undefined || i.component.engine !== undefined,
+    );
+    if (!source.found) return null;
+
+    // The chain from the source down to the target, in that order. `path` is
+    // built target-first and its last entry is the source itself.
+    const chain = [...source.path].reverse().slice(1);
+    const driver = source.found;
+    let shaftTorque = 0;
+    let shaftSpeed = 0;
+    let amps = 0;
+
+    if (driver.component.motor) {
+      const motor = driver.component.motor;
+      // The ESC is what actually limits current, so find it before asking the
+      // motor what it can do.
+      const controller = findUpstream(graph, driver.uid, (i) => i.component.esc !== undefined);
+      const limit = controller.found?.component.esc?.maxAmps ?? Infinity;
+
+      if (!controller.found) {
+        note({
+          severity: 'error',
+          uid: driver.uid,
+          message: `${driver.component.name} is not wired to a speed controller.`,
+        });
+      } else if (volts === 0) {
+        note({ severity: 'error', uid: driver.uid, message: 'No battery reaches this motor.' });
+      }
+
+      shaftTorque = stallTorque(motor, volts, limit);
+      shaftSpeed = freeSpeed(motor, volts);
+      amps = Math.min(stallCurrent(motor, volts), limit);
+
+      if (cells > motor.maxCells) {
+        note({
+          severity: 'error',
+          uid: driver.uid,
+          message: `${driver.component.name} is rated ${motor.maxCells}S, the pack is ${cells}S.`,
+        });
+      }
+      if (controller.found?.component.esc && cells > controller.found.component.esc.maxCells) {
+        note({
+          severity: 'error',
+          uid: controller.found.uid,
+          message: `${controller.found.component.name} is rated ${controller.found.component.esc.maxCells}S, the pack is ${cells}S.`,
+        });
+      }
+      if (amps > motor.continuousCurrent) {
+        note({
+          severity: 'warning',
+          uid: driver.uid,
+          message:
+            `${driver.component.name} can pull ${amps.toFixed(0)} A against a continuous rating of ` +
+            `${motor.continuousCurrent} A. It will overheat if you hold it stalled.`,
+        });
+      }
+    } else if (driver.component.engine) {
+      const engine = driver.component.engine;
+      // An engine makes its torque in a band rather than at stall, so the
+      // figure that matters is what it makes at its peak.
+      const peak = (engine.peakRpm * 2 * Math.PI) / 60;
+      shaftTorque = engine.peakPower / peak;
+      shaftSpeed = peak;
+
+      const clutch = findUpstream(graph, targetUid, (i) => i.component.clutch !== undefined);
+      if (!clutch.found) {
+        note({
+          severity: 'error',
+          uid: driver.uid,
+          message: `${driver.component.name} has no clutch. An engine cannot start against load.`,
+        });
+      }
+      const tank = findUpstream(graph, driver.uid, (i) => i.component.tank !== undefined);
+      if (!tank.found) {
+        note({ severity: 'error', uid: driver.uid, message: `${driver.component.name} has no fuel tank.` });
+      }
+      if (isWheel(targetUid)) {
+        const reversing = source.path.some((uid) => graph.byUid.get(uid)?.component.gearbox?.reversing === true);
+        if (!reversing) {
+          note({
+            severity: 'warning',
+            uid: driver.uid,
+            message: 'No reversing gearbox: this machine cannot back up.',
+          });
+        }
+      }
+    }
+
+    // Walk the chain, multiplying torque up and dividing speed down, checking
+    // each link against the torque it is actually handed. Checking the motor's
+    // own output instead would clear a 40:1 box sitting behind a 4:1 one, and
+    // that is precisely the build that strips.
+    let torque = shaftTorque;
+    let speed = shaftSpeed;
+    for (const uid of chain) {
+      const link = graph.byUid.get(uid)?.component;
+      if (!link) continue;
+      const rating = link.gearbox?.torqueRating ?? link.clutch?.torqueRating;
+      if (rating !== undefined && torque > rating) {
+        note({
+          severity: 'error',
+          uid,
+          message:
+            `${link.name} is handed ${torque.toFixed(2)} N\u00b7m against a rating of ` +
+            `${rating} N\u00b7m. It will strip.`,
+        });
+      }
+      if (link.gearbox) {
+        torque *= link.gearbox.ratio * gearboxEfficiency(link.gearbox);
+        speed /= link.gearbox.ratio;
+      }
+    }
+
+    // Per source, not per target: one motor driving two wheels through a
+    // differential draws one motor's worth of current, not two.
+    if (!counted.has(driver.uid)) {
+      counted.add(driver.uid);
+      demandAmps += amps;
+    }
+
+    return { torque, speed, amps };
+  };
+
+  const wheels: SolvedWheel[] = [];
   for (const installed of machine.installed) {
     const spec = installed.component.wheel;
     if (!spec) continue;
@@ -197,151 +401,141 @@ export function solve(machine: Machine): Solution {
       peakAmps: 0,
     };
 
-    // Trace the drive chain back from the wheel to whatever turns it.
-    const source = findUpstream(graph, installed.uid, (i) => i.component.motor !== undefined || i.component.engine !== undefined);
-    if (!source.found) {
+    const driven = traceShaft(installed.uid);
+    if (!driven) {
       wheels.push(idle);
       continue;
     }
-
-    // The chain from the source down to the wheel, in that order. `path` is
-    // built wheel-first, and its last entry is the source itself.
-    const chain = [...source.path].reverse().slice(1);
-    const driver = source.found;
-    let shaftTorque = 0;
-    let shaftSpeed = 0;
-    let amps = 0;
-
-    if (driver.component.motor) {
-      const motor = driver.component.motor;
-      // The ESC is what actually limits current, so find it before asking the
-      // motor what it can do.
-      const controller = findUpstream(graph, driver.uid, (i) => i.component.esc !== undefined);
-      const limit = controller.found?.component.esc?.maxAmps ?? Infinity;
-
-      if (!controller.found) {
-        faults.push({
-          severity: 'error',
-          uid: driver.uid,
-          message: `${driver.component.name} is not wired to a speed controller.`,
-        });
-      } else if (volts === 0) {
-        faults.push({ severity: 'error', uid: driver.uid, message: 'No battery reaches this motor.' });
-      }
-
-      shaftTorque = stallTorque(motor, volts, limit);
-      shaftSpeed = freeSpeed(motor, volts);
-      amps = Math.min(stallCurrent(motor, volts), limit);
-
-      if (cells > motor.maxCells) {
-        faults.push({
-          severity: 'error',
-          uid: driver.uid,
-          message: `${driver.component.name} is rated ${motor.maxCells}S, the pack is ${cells}S.`,
-        });
-      }
-      if (controller.found?.component.esc && cells > controller.found.component.esc.maxCells) {
-        faults.push({
-          severity: 'error',
-          uid: controller.found.uid,
-          message: `${controller.found.component.name} is rated ${controller.found.component.esc.maxCells}S, the pack is ${cells}S.`,
-        });
-      }
-      if (amps > motor.continuousCurrent) {
-        faults.push({
-          severity: 'warning',
-          uid: driver.uid,
-          message:
-            `${driver.component.name} can pull ${amps.toFixed(0)} A against a continuous rating of ` +
-            `${motor.continuousCurrent} A. It will overheat if you hold it stalled.`,
-        });
-      }
-    } else if (driver.component.engine) {
-      const engine = driver.component.engine;
-      // An engine makes its torque in a band rather than at stall, so the
-      // figure that matters is what it makes at its peak.
-      const peak = (engine.peakRpm * 2 * Math.PI) / 60;
-      shaftTorque = engine.peakPower / peak;
-      shaftSpeed = peak;
-
-      const clutch = findUpstream(graph, installed.uid, (i) => i.component.clutch !== undefined);
-      if (!clutch.found) {
-        faults.push({
-          severity: 'error',
-          uid: driver.uid,
-          message: `${driver.component.name} has no clutch. An engine cannot start against load.`,
-        });
-      }
-      const tank = findUpstream(graph, driver.uid, (i) => i.component.tank !== undefined);
-      if (!tank.found) {
-        faults.push({ severity: 'error', uid: driver.uid, message: `${driver.component.name} has no fuel tank.` });
-      }
-      const reversing = source.path.some((uid) => graph.byUid.get(uid)?.component.gearbox?.reversing === true);
-      if (!reversing) {
-        faults.push({
-          severity: 'warning',
-          uid: driver.uid,
-          message: 'No reversing gearbox: this machine cannot back up.',
-        });
-      }
-    }
-
-    // Walk the chain, multiplying torque up and dividing speed down, checking
-    // each link against the torque it is actually handed. Checking the motor's
-    // own output instead would clear a 40:1 box sitting behind a 4:1 one, and
-    // that is precisely the build that strips.
-    let torque = shaftTorque;
-    let speed = shaftSpeed;
-    for (const uid of chain) {
-      const link = graph.byUid.get(uid)?.component;
-      if (!link) continue;
-      const rating = link.gearbox?.torqueRating ?? link.clutch?.torqueRating;
-      if (rating !== undefined && torque > rating) {
-        faults.push({
-          severity: 'error',
-          uid,
-          message:
-            `${link.name} is handed ${torque.toFixed(2)} N·m against a rating of ` +
-            `${rating} N·m. It will strip.`,
-        });
-      }
-      if (link.gearbox) {
-        torque *= link.gearbox.ratio * gearboxEfficiency(link.gearbox);
-        speed /= link.gearbox.ratio;
-      }
-    }
-
-    // Per source, not per wheel: one motor driving two wheels through a
-    // differential draws one motor's worth of current, not two.
-    if (!counted.has(driver.uid)) {
-      counted.add(driver.uid);
-      demandAmps += amps;
-    }
-
     wheels.push({
       ...idle,
       driven: true,
-      wheelTorque: torque,
-      freeSpeed: speed,
-      peakWatts: amps * volts,
-      peakAmps: amps,
+      wheelTorque: driven.torque,
+      freeSpeed: driven.speed,
+      peakWatts: driven.amps * volts,
+      peakAmps: driven.amps,
+    });
+  }
+
+  // ── spinning weapons ────────────────────────────────────────────────────
+  const spinners: SolvedSpinner[] = [];
+  for (const installed of machine.installed) {
+    const spec = installed.component.spinner;
+    if (!spec) continue;
+
+    const driven = traceShaft(installed.uid);
+    const torque = driven?.torque ?? 0;
+    const free = driven?.speed ?? 0;
+
+    if (!driven) {
+      note({
+        severity: 'error',
+        uid: installed.uid,
+        message: `${installed.component.name} has nothing turning it.`,
+      });
+    }
+
+    const up = spinUpTime(spec.inertia, torque, free);
+    if (driven && up > 20) {
+      note({
+        severity: 'warning',
+        uid: installed.uid,
+        message:
+          `${installed.component.name} takes ${up.toFixed(0)} s to reach speed. ` +
+          'Gear it lower or fit a bigger motor — a match is shorter than that.',
+      });
+    }
+
+    spinners.push({
+      uid: installed.uid,
+      component: installed.component,
+      driven: driven !== null,
+      torque,
+      freeSpeed: free,
+      inertia: spec.inertia,
+      reach: spec.reach,
+      teeth: spec.teeth,
+      spinUp: up,
+      energy: spinnerEnergy(spec.inertia, free),
+      tipSpeed: free * spec.reach,
+      peakAmps: driven?.amps ?? 0,
+    });
+  }
+
+  // ── arm weapons, on the gas chain ───────────────────────────────────────
+  //
+  // A third chain, and the shortest: bottle to regulator to ram. The
+  // regulator setting is the decision — crank it up for a harder hit and the
+  // bottle empties faster.
+  const arms: SolvedArm[] = [];
+  for (const installed of machine.installed) {
+    const spec = installed.component.arm;
+    const ram = installed.component.ram;
+    if (!spec || !ram) continue;
+
+    const regulator = findUpstream(graph, installed.uid, (i) => i.component.regulator !== undefined);
+    const bottle = findUpstream(graph, installed.uid, (i) => i.component.gas !== undefined);
+    const bar = regulator.found?.component.regulator?.bar ?? 0;
+
+    if (!regulator.found) {
+      note({
+        severity: 'error',
+        uid: installed.uid,
+        message: `${installed.component.name} has no regulator. Bottle pressure would burst the ram.`,
+      });
+    }
+    if (!bottle.found) {
+      note({ severity: 'error', uid: installed.uid, message: `${installed.component.name} has no gas bottle.` });
+    }
+
+    const torque = armTorque(spec, ram, bar);
+    const force = bar > 0 ? torque / (spec.reach * 0.25) : 0;
+    if (force > spec.forceRating) {
+      note({
+        severity: 'error',
+        uid: installed.uid,
+        message:
+          `${installed.component.name} is fed ${bar} bar, which is ${force.toFixed(0)} N against a ` +
+          `${spec.forceRating} N arm. Turn the regulator down.`,
+      });
+    }
+
+    const bottleGas = bottle.found?.component.gas;
+    const shots = bottleGas && bar > 0 ? shotsAvailable(bottleGas, ram, bar) : 0;
+    if (bottle.found && shots < 4 && shots > 0) {
+      note({
+        severity: 'warning',
+        uid: installed.uid,
+        message: `Only ${shots} shots at ${bar} bar. A bigger bottle, or less pressure.`,
+      });
+    }
+
+    arms.push({
+      uid: installed.uid,
+      component: installed.component,
+      armed: regulator.found !== null && bottle.found !== null,
+      kind: spec.kind,
+      torque,
+      reach: spec.reach,
+      inertia: spec.inertia,
+      bar,
+      shots,
     });
   }
 
   // ── machine-wide checks ─────────────────────────────────────────────────
   if (machine.installed.length > 0) {
     if (packs.length === 0 && !machine.installed.some((i) => i.component.engine)) {
-      faults.push({ severity: 'error', message: 'No battery and no engine. Nothing will turn.' });
+      note({ severity: 'error', message: 'No battery and no engine. Nothing will turn.' });
     }
     if (!machine.installed.some((i) => i.component.receiver)) {
-      faults.push({ severity: 'error', message: 'No receiver. Nothing can be commanded.' });
+      note({ severity: 'error', message: 'No receiver. Nothing can be commanded.' });
     }
     if (!wheels.some((w) => w.driven)) {
-      faults.push({ severity: 'error', message: 'Nothing drives a wheel. This will sit where you drop it.' });
+      note({ severity: 'error', message: 'Nothing drives a wheel. This will sit where you drop it.' });
     }
     for (const installed of machine.installed) {
       if (installed.component.gearbox && (graph.downstream.get(installed.uid) ?? []).length === 0) {
-        faults.push({
+        note({
           severity: 'warning',
           uid: installed.uid,
           message: `${installed.component.name} drives nothing.`,
@@ -352,7 +546,7 @@ export function solve(machine: Machine): Solution {
 
   const sag = demandAmps > 0 && supplyAmps > 0 ? Math.min(1, supplyAmps / demandAmps) : 1;
   if (supplyAmps > 0 && demandAmps > supplyAmps) {
-    faults.push({
+    note({
       severity: 'warning',
       message:
         `Peak draw ${demandAmps.toFixed(0)} A, pack delivers ${supplyAmps.toFixed(0)} A — ` +
@@ -360,5 +554,5 @@ export function solve(machine: Machine): Solution {
     });
   }
 
-  return { wheels, faults, volts, supplyAmps, demandAmps, sag, energy, mass, fuel };
+  return { wheels, spinners, arms, faults, volts, supplyAmps, demandAmps, sag, energy, mass, fuel };
 }

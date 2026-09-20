@@ -21,10 +21,10 @@
  * What a port carries.
  *
  * Shafts carry rotation, power carries current, signal carries commands, fuel
- * carries fuel. A port only connects to its opposite: `shaft-out` to
- * `shaft-in`, never `shaft-out` to `shaft-out`.
+ * carries fuel and gas carries pressure. A port only connects to its opposite:
+ * `shaft-out` to `shaft-in`, never `shaft-out` to `shaft-out`.
  */
-export type PortKind = 'shaft' | 'power' | 'signal' | 'fuel';
+export type PortKind = 'shaft' | 'power' | 'signal' | 'fuel' | 'gas';
 
 export type PortDirection = 'in' | 'out';
 
@@ -141,6 +141,67 @@ export interface TankSpec {
   readonly litres: number;
 }
 
+
+/**
+ * A spinning weapon: a disc, a bar or a drum.
+ *
+ * Note what is *not* here — no torque, no spin rate, no damage. A spinner is a
+ * lump of steel on a shaft, and what it does depends entirely on the motor and
+ * gearbox behind it, exactly as a wheel does. That is the whole reason it is
+ * modelled this way: under the old part model a "weapon" arrived with its
+ * energy pre-decided, so the most interesting decision in the machine — how
+ * hard to gear the thing that has to reach speed before contact — did not
+ * exist.
+ */
+export interface SpinnerSpec {
+  readonly kind: 'DISC' | 'BAR' | 'DRUM';
+  /** Rotational inertia about its own axis, kg·m². Sets spin-up time. */
+  readonly inertia: number;
+  /** Radius of the striking edge, m. Sets tip speed and reach. */
+  readonly reach: number;
+  /** Striking edges per revolution. More bites, each carrying less. */
+  readonly teeth: number;
+}
+
+/** A hammer or a flipper: an arm on a pivot, thrown by a gas ram. */
+export interface ArmSpec {
+  readonly kind: 'HAMMER' | 'FLIPPER';
+  /** Pivot to head, m. The lever the ram works through. */
+  readonly reach: number;
+  /** Inertia about the pivot, kg·m². */
+  readonly inertia: number;
+  /** Ram force it is rated to take, N. More than this and the arm bends. */
+  readonly forceRating: number;
+}
+
+/**
+ * The pneumatic ram built into an arm.
+ *
+ * Force scales with the pressure it is fed, so the regulator setting is a real
+ * decision: crank it up for a harder hit and the bottle empties faster.
+ */
+export interface RamSpec {
+  /** Piston area, m². Force is this times pressure. */
+  readonly bore: number;
+  readonly stroke: number;
+  /** Gas used per shot, litres at atmospheric. */
+  readonly displacement: number;
+}
+
+/** A gas bottle. Shots, in the end. */
+export interface GasSpec {
+  /** Stored gas, litres at atmospheric pressure. */
+  readonly litres: number;
+  /** Bottle pressure, bar. */
+  readonly bar: number;
+}
+
+/** A regulator. Steps bottle pressure down to something a ram survives. */
+export interface RegulatorSpec {
+  /** Output pressure, bar. */
+  readonly bar: number;
+}
+
 // ── the component itself ───────────────────────────────────────────────────
 
 export type ComponentCategory =
@@ -211,6 +272,11 @@ export interface ComponentDef {
   readonly esc?: EscSpec;
   readonly receiver?: ReceiverSpec;
   readonly tank?: TankSpec;
+  readonly spinner?: SpinnerSpec;
+  readonly arm?: ArmSpec;
+  readonly ram?: RamSpec;
+  readonly gas?: GasSpec;
+  readonly regulator?: RegulatorSpec;
   /** Pure mass, for trimming the centre of gravity. */
   readonly ballast?: boolean;
 }
@@ -292,4 +358,53 @@ export function packCurrent(pack: PackSpec): number {
 
 export function packEnergy(pack: PackSpec): number {
   return packVoltage(pack) * pack.capacity;
+}
+
+/** Bar to pascals. Bottles and regulators are quoted in bar; force is in SI. */
+const BAR_TO_PA = 100_000;
+
+/** Ram force at a given regulated pressure, newtons. */
+export function ramForce(ram: RamSpec, bar: number): number {
+  return ram.bore * bar * BAR_TO_PA;
+}
+
+/**
+ * Torque a ram develops about an arm's pivot, N·m.
+ *
+ * The ram pushes near the root of the arm, so it works through a short lever
+ * and the head travels far. A quarter of the reach is the usual geometry and
+ * is what the arm models here assume.
+ */
+export function armTorque(arm: ArmSpec, ram: RamSpec, bar: number): number {
+  return ramForce(ram, bar) * arm.reach * 0.25;
+}
+
+/**
+ * Shots in a bottle at a given regulated pressure.
+ *
+ * Gas is stored compressed and spent expanded, so what matters is volume at
+ * pressure: a ram swallowing 0.2 litres per shot at 10 bar is really taking
+ * two litres of atmospheric gas out of the bottle.
+ */
+export function shotsAvailable(gas: GasSpec, ram: RamSpec, bar: number): number {
+  const perShot = ram.displacement * bar;
+  return perShot > 0 ? Math.floor(gas.litres / perShot) : 0;
+}
+
+/**
+ * Seconds for a spinner to reach a fraction of its free speed.
+ *
+ * A motor driving a flywheel approaches free speed exponentially, with a time
+ * constant of inertia times free speed over stall torque. This is the number
+ * that makes spinning up a decision made before contact rather than during it.
+ */
+export function spinUpTime(inertia: number, torque: number, free: number, fraction = 0.9): number {
+  if (torque <= 0 || free <= 0) return Infinity;
+  const tau = (inertia * free) / torque;
+  return -tau * Math.log(1 - fraction);
+}
+
+/** Kinetic energy stored in a spinner at a given rate, joules. */
+export function spinnerEnergy(inertia: number, rad: number): number {
+  return 0.5 * inertia * rad * rad;
 }
