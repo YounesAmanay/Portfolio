@@ -26,21 +26,22 @@ const STEER_UP = 14;
 const STEER_DOWN = 18;
 const TRIGGER_RATE = 8;
 
-/**
- * Radius of stick travel treated as centre.
- *
- * Capacitive touch reports a few percent of drift from a resting thumb, and
- * without a dead zone that drift is a permanent slow turn.
- */
-const DEADZONE = 0.15;
-
 export class Controls {
   readonly input: ControlInput = neutralInput();
   readonly #keys = new Set<string>();
 
-  /** Touch stick, normalised to [-1, 1] on each axis. */
-  #stickX = 0;
-  #stickY = 0;
+  /**
+   * Touch controls, as discrete held buttons.
+   *
+   * Steering and throttle are separate thumbs, which is what every driving
+   * game on a phone does and what a single two-axis stick cannot give you: one
+   * thumb cannot hold a steady throttle and make a steering correction at the
+   * same time without doing both at once, so every turn became a swerve.
+   */
+  #touchLeft = false;
+  #touchRight = false;
+  #touchForward = false;
+  #touchBack = false;
   #touchWeapon = false;
   #touchLift = false;
 
@@ -70,18 +71,14 @@ export class Controls {
     });
   }
 
-  /**
-   * Stick position, normalised to [-1, 1] per axis.
-   *
-   * The dead zone is applied radially rather than per axis, so the corners of
-   * the square are not treated differently from the edges, and the remaining
-   * travel is rescaled from zero — otherwise the machine jumps to 15% throttle
-   * the instant the thumb leaves centre.
-   */
-  setStick(x: number, y: number): void {
-    const shaped = shapeStick(x, y);
-    this.#stickX = shaped.x;
-    this.#stickY = shaped.y;
+  setSteer(direction: -1 | 1, held: boolean): void {
+    if (direction < 0) this.#touchLeft = held;
+    else this.#touchRight = held;
+  }
+
+  setThrottle(direction: -1 | 1, held: boolean): void {
+    if (direction < 0) this.#touchBack = held;
+    else this.#touchForward = held;
   }
 
   setWeapon(active: boolean): void {
@@ -96,13 +93,14 @@ export class Controls {
   update(dt: number): ControlInput {
     const held = (...codes: string[]): number => (codes.some((c) => this.#keys.has(c)) ? 1 : 0);
 
+    const touch = (on: boolean): number => (on ? 1 : 0);
     const targetDrive = clamp(
-      held('KeyW', 'ArrowUp') - held('KeyS', 'ArrowDown') - this.#stickY,
+      held('KeyW', 'ArrowUp') - held('KeyS', 'ArrowDown') + touch(this.#touchForward) - touch(this.#touchBack),
       -1,
       1,
     );
     const targetSteer = clamp(
-      held('KeyD', 'ArrowRight') - held('KeyA', 'ArrowLeft') + this.#stickX,
+      held('KeyD', 'ArrowRight') - held('KeyA', 'ArrowLeft') + touch(this.#touchRight) - touch(this.#touchLeft),
       -1,
       1,
     );
@@ -118,8 +116,10 @@ export class Controls {
 
   reset(): void {
     this.#keys.clear();
-    this.#stickX = 0;
-    this.#stickY = 0;
+    this.#touchLeft = false;
+    this.#touchRight = false;
+    this.#touchForward = false;
+    this.#touchBack = false;
     this.#touchWeapon = false;
     this.#touchLift = false;
     Object.assign(this.input, neutralInput());
@@ -137,27 +137,6 @@ const DRIVING_KEYS = new Set([
   'Space', 'ShiftLeft', 'ShiftRight',
 ]);
 
-/**
- * Dead zone and response curve for a thumb stick.
- *
- * The dead zone is radial rather than per axis, so the corners of the square
- * are not treated differently from the edges, and the remaining travel is
- * rescaled from zero — without that the machine jumps straight to 15% throttle
- * the instant a thumb leaves centre. The curve then spends most of the travel
- * on the slow half, which is where placing a machine accurately happens.
- *
- * Pure, and exported for that reason: it is the part of the control feel worth
- * pinning down in a test.
- */
-export function shapeStick(x: number, y: number): { x: number; y: number } {
-  const magnitude = Math.hypot(x, y);
-  if (magnitude <= DEADZONE) return { x: 0, y: 0 };
-
-  const live = Math.min(1, (magnitude - DEADZONE) / (1 - DEADZONE));
-  const scale = (live * live * 0.6 + live * 0.4) / magnitude;
-  return { x: clamp(x * scale, -1, 1), y: clamp(y * scale, -1, 1) };
-}
-
 export function approach(current: number, target: number, dt: number, up: number, down: number): number {
   const rate = Math.abs(target) > Math.abs(current) ? up : down;
   const step = rate * dt;
@@ -166,60 +145,18 @@ export function approach(current: number, target: number, dt: number, up: number
 }
 
 /**
- * A thumb stick for touch devices.
+ * A held button for touch.
  *
- * Marked `data-no-orbit` so dragging it never also rotates the camera — the
- * two live on the same canvas and would otherwise fight for every gesture.
+ * `variant` selects its size and role in the stylesheet; the throttle is the
+ * biggest target on screen because it is the one held the whole match.
  */
-export function createTouchStick(onMove: (x: number, y: number) => void): HTMLElement {
-  const base = document.createElement('div');
-  base.className = 'stick';
-  base.setAttribute('data-no-orbit', '');
-
-  const knob = document.createElement('div');
-  knob.className = 'stick__knob';
-  base.appendChild(knob);
-
-  let active = -1;
-  const radius = 46;
-
-  const move = (event: PointerEvent): void => {
-    if (event.pointerId !== active) return;
-    const rect = base.getBoundingClientRect();
-    const dx = event.clientX - (rect.left + rect.width / 2);
-    const dy = event.clientY - (rect.top + rect.height / 2);
-    const distance = Math.hypot(dx, dy);
-    const scale = distance > radius ? radius / distance : 1;
-    const x = dx * scale;
-    const y = dy * scale;
-    knob.style.transform = `translate(${x}px, ${y}px)`;
-    // Raw travel: the dead zone and response curve belong to Controls, so the
-    // knob keeps tracking the thumb exactly even inside the dead zone.
-    onMove(x / radius, y / radius);
-  };
-
-  const release = (event: PointerEvent): void => {
-    if (event.pointerId !== active) return;
-    active = -1;
-    knob.style.transform = 'translate(0px, 0px)';
-    onMove(0, 0);
-  };
-
-  base.addEventListener('pointerdown', (event) => {
-    active = event.pointerId;
-    base.setPointerCapture(event.pointerId);
-    move(event);
-  });
-  base.addEventListener('pointermove', move);
-  base.addEventListener('pointerup', release);
-  base.addEventListener('pointercancel', release);
-
-  return base;
-}
-
-export function createTouchButton(label: string, onChange: (down: boolean) => void): HTMLElement {
+export function createTouchButton(
+  label: string,
+  onChange: (down: boolean) => void,
+  variant = '',
+): HTMLElement {
   const button = document.createElement('button');
-  button.className = 'touch-btn';
+  button.className = `touch-btn ${variant}`.trim();
   button.textContent = label;
   button.setAttribute('data-no-orbit', '');
   button.addEventListener('pointerdown', (event) => {
@@ -233,6 +170,9 @@ export function createTouchButton(label: string, onChange: (down: boolean) => vo
   };
   button.addEventListener('pointerup', up);
   button.addEventListener('pointercancel', up);
+  // A thumb that slides off the edge must release it, or the machine drives
+  // away on its own with nothing held.
+  button.addEventListener('pointerleave', up);
   return button;
 }
 

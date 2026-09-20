@@ -207,28 +207,66 @@ option { background: var(--panel-solid); }
 .gauge__fill--heat { background: linear-gradient(90deg, #a86f2e, var(--amber)); }
 .gauge__fill--heat.is-hot { background: linear-gradient(90deg, #8a2b33, var(--red)); }
 
-/* ── touch controls ──────────────────────────────────────────────────────── */
+/* ── touch controls ────────────────────────────────────── */
 
-.stick {
-  position: absolute; left: 18px; bottom: 96px; width: 120px; height: 120px;
-  border-radius: 50%; border: 1px solid var(--line-strong);
-  background: rgba(9,14,22,0.55); backdrop-filter: blur(10px);
-  touch-action: none; z-index: 16;
+/*
+ * Two thumbs, two jobs: steering bottom-left, throttle bottom-right. This is
+ * how every driving game on a phone is laid out, and the reason is mechanical
+ * rather than conventional — one thumb on a two-axis stick cannot hold a
+ * steady throttle and make a steering correction independently, because both
+ * are the same movement of the same joint.
+ */
+
+.pad {
+  position: absolute;
+  bottom: calc(14px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  z-index: 16;
 }
-.stick__knob {
-  position: absolute; left: 50%; top: 50%; width: 52px; height: 52px; margin: -26px 0 0 -26px;
-  border-radius: 50%; background: rgba(77,226,255,0.22); border: 1px solid var(--cyan);
-  box-shadow: 0 0 22px -6px var(--cyan);
-  transition: transform .06s linear;
-}
-.touch-cluster { position: absolute; right: 18px; bottom: 96px; display: grid; gap: 10px; z-index: 16; }
+.pad--steer { left: 16px; }
+.pad--drive { right: 16px; flex-direction: column; align-items: flex-end; }
+
+.pedals { display: flex; align-items: flex-end; gap: 12px; }
+
 .touch-btn {
-  width: 74px; height: 74px; border-radius: 50%; cursor: pointer;
-  background: rgba(9,14,22,0.6); border: 1px solid var(--line-strong);
-  backdrop-filter: blur(10px); touch-action: none;
-  font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em; color: var(--ink-dim);
+  border-radius: 50%;
+  cursor: pointer;
+  background: rgba(9, 14, 22, 0.62);
+  border: 1px solid var(--line-strong);
+  backdrop-filter: blur(10px);
+  touch-action: none;
+  /* Never let a drag on a control become a drag on the camera. */
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  color: var(--ink-dim);
+  display: grid;
+  place-items: center;
+  transition: background .08s, border-color .08s, transform .08s;
 }
-.touch-btn.is-down { background: rgba(255,92,106,0.24); border-color: var(--red); color: #fff; }
+.touch-btn.is-down {
+  background: rgba(77, 226, 255, 0.26);
+  border-color: var(--cyan);
+  color: #fff;
+  transform: scale(0.94);
+}
+
+/* Steering: the pair the left thumb rocks between. */
+.touch-btn--steer { width: 82px; height: 82px; font-size: 19px; }
+
+/* Throttle is the largest target on screen — it is held for the whole match. */
+.touch-btn--throttle { width: 92px; height: 92px; font-size: 21px; }
+.touch-btn--throttle.is-down { background: rgba(77, 255, 176, 0.26); border-color: var(--green); }
+
+.touch-btn--reverse { width: 68px; height: 68px; font-size: 16px; }
+
+/* Above the throttle, reachable without letting go of it. */
+.touch-btn--weapon { width: 68px; height: 68px; font-size: 9px; }
+.touch-btn--weapon.is-down { background: rgba(255, 92, 106, 0.28); border-color: var(--red); }
 
 /* ── result ──────────────────────────────────────────────────────────────── */
 
@@ -329,20 +367,23 @@ option { background: var(--panel-solid); }
   .hud__big { font-size: 34px; }
   .hud__status { top: 58px; }
 
-  /* The stick clears the gauges: 6px inset + 88px of gauge + 12px of air.
-     At 86px the knob sat on top of the speed readout it exists to move. */
-  .stick { left: 14px; bottom: calc(106px + env(safe-area-inset-bottom)); width: 104px; height: 104px; }
-  .stick__knob { width: 46px; height: 46px; margin: -23px 0 0 -23px; }
-  .touch-cluster { right: 14px; bottom: calc(106px + env(safe-area-inset-bottom)); gap: 8px; }
-  .touch-btn { width: 64px; height: 64px; }
+  /* The pads clear the gauges: 6px inset + 88px of gauge + 12px of air. */
+  .pad { bottom: calc(106px + env(safe-area-inset-bottom)); gap: 10px; }
+  .pad--steer { left: 10px; }
+  .pad--drive { right: 10px; }
+  .touch-btn--steer { width: 74px; height: 74px; }
+  .touch-btn--throttle { width: 84px; height: 84px; }
+  .touch-btn--reverse, .touch-btn--weapon { width: 62px; height: 62px; }
 }
 
 /* Landscape phones are short, not narrow: reclaim the vertical budget. */
 @media (max-width: 900px) and (max-height: 480px) {
   .panel--library, .panel--readout { max-height: 78vh; }
-  .stick { bottom: calc(10px + env(safe-area-inset-bottom)); width: 92px; height: 92px; }
-  .touch-cluster { bottom: calc(10px + env(safe-area-inset-bottom)); grid-auto-flow: column; }
-  .touch-btn { width: 56px; height: 56px; }
+  .pad { bottom: calc(10px + env(safe-area-inset-bottom)); }
+  .pad--drive { flex-direction: row; align-items: flex-end; }
+  .touch-btn--steer { width: 66px; height: 66px; }
+  .touch-btn--throttle { width: 74px; height: 74px; }
+  .touch-btn--reverse, .touch-btn--weapon { width: 56px; height: 56px; }
   /* Both bottom corners belong to the thumbs here, so the gauges go up top. */
   .gauges { width: 132px; top: 52px; bottom: auto; }
   .hud__big { font-size: 26px; }

@@ -20,7 +20,7 @@ import type { PartCategory, PartDef } from '../kinetic/parts/types';
 import { OrbitCamera } from '../render/orbit-camera';
 import { Stage } from '../render/stage';
 import { ArenaSession } from './arena-session';
-import { Controls, createTouchButton, createTouchStick, isTouchDevice } from './controls';
+import { Controls, createTouchButton, isTouchDevice } from './controls';
 import { Workshop } from './workshop';
 
 type Mode = 'WORKSHOP' | 'ARENA';
@@ -369,11 +369,27 @@ class App {
     hud.appendChild(back);
 
     if (isTouchDevice()) {
-      hud.appendChild(createTouchStick((x, y) => this.controls.setStick(x, y)));
-      const cluster = el('div', 'touch-cluster');
-      cluster.appendChild(createTouchButton('WEAPON', (d) => this.controls.setWeapon(d)));
-      cluster.appendChild(createTouchButton('LIFT', (d) => this.controls.setLift(d)));
-      hud.appendChild(cluster);
+      // Steering under the left thumb, throttle under the right, the way every
+      // driving game on a phone lays it out. A single two-axis stick made one
+      // thumb responsible for both, so holding a throttle and correcting a line
+      // were the same gesture and every turn came out as a swerve.
+      const steering = el('div', 'pad pad--steer');
+      steering.appendChild(createTouchButton('◀', (d) => this.controls.setSteer(-1, d), 'touch-btn--steer'));
+      steering.appendChild(createTouchButton('▶', (d) => this.controls.setSteer(1, d), 'touch-btn--steer'));
+      hud.appendChild(steering);
+
+      const driving = el('div', 'pad pad--drive');
+      // Weapon sits above the throttle, reachable without letting go of it.
+      driving.appendChild(createTouchButton('WEAPON', (d) => this.controls.setWeapon(d), 'touch-btn--weapon'));
+      // Thrusters only appear on a machine that has any.
+      if (this.design.placements.some((p) => getPart(p.partId)?.thruster !== undefined)) {
+        driving.appendChild(createTouchButton('LIFT', (d) => this.controls.setLift(d), 'touch-btn--weapon'));
+      }
+      const pedals = el('div', 'pedals');
+      pedals.appendChild(createTouchButton('▼', (d) => this.controls.setThrottle(-1, d), 'touch-btn--reverse'));
+      pedals.appendChild(createTouchButton('▲', (d) => this.controls.setThrottle(1, d), 'touch-btn--throttle'));
+      driving.appendChild(pedals);
+      hud.appendChild(driving);
     }
 
     return hud;
