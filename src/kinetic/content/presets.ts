@@ -28,68 +28,103 @@ function build(name: string, specs: readonly Spec[]): Design {
   return design;
 }
 
-/** Four balanced pods, low deck, battery on the floor. The reference machine. */
+/**
+ * Four balanced pods, low deck, battery over the floor. The reference machine.
+ *
+ * Every preset below is a single connected assembly: each part shares a face
+ * with another. That sounds obvious and none of them used to be — the pods were
+ * parked beside the deck with a whole cell of air between, and the simulation
+ * welded the lot into one rigid body regardless, so four wheels bolted to
+ * nothing drove the machine perfectly well.
+ *
+ * Making it a rule immediately bit, and the bite is the interesting part. A
+ * 3x3 deck plate reaches a 3-cell stance and no further, and a 3-cell stance is
+ * too narrow: the machine pitches up under its own torque and beaches on its
+ * pod housings with the wheels spinning — 0.4 m travelled in three seconds
+ * against 16 m at four cells. So a wide stance has to be *built*, with rails
+ * out to the far pods, which is exactly the lesson the rail carries: structure
+ * is not free mass, and a wheelbase you have not joined is not a wheelbase.
+ *
+ * They share one chassis pattern: pods on a 5-cell square, two deck plates down
+ * the spine, and two cross rails reaching the outboard pair. Controllers sit
+ * beside their batteries rather than on top of them — stacking them put the
+ * centre of mass above half the wheelbase and both light machines flipped
+ * themselves over under power.
+ */
 export const SCOUT: Design = build('SCOUT', [
+  // Longer than it is wide. It flips about the pitch axis long before the roll
+  // axis, because that is the one it accelerates along — at an even 5x5 stance
+  // it put itself on its back after four seconds of full throttle.
   { part: 'drive.balanced', at: [0, 0, 0] },
   { part: 'drive.balanced', at: [5, 0, 0] },
-  { part: 'drive.balanced', at: [0, 0, 5] },
-  { part: 'drive.balanced', at: [5, 0, 5] },
-  { part: 'str.plate', at: [2, 2, 2] },
-  { part: 'bat.lipo6s', at: [2, 3, 2] },
-  { part: 'ctl.basic', at: [3, 4, 3] },
-  { part: 'arm.poly', at: [2, 3, 0] },
+  { part: 'drive.balanced', at: [0, 0, 6] },
+  { part: 'drive.balanced', at: [5, 0, 6] },
+  { part: 'str.plate', at: [1, 2, 1] },
+  { part: 'str.plate', at: [1, 2, 4] },
+  { part: 'str.rail', at: [3, 2, 0], yaw: 1 },
+  { part: 'str.rail', at: [3, 2, 7], yaw: 1 },
+  { part: 'bat.lipo6s', at: [1, 3, 1] },
+  { part: 'ctl.basic', at: [1, 3, 3] },
+  { part: 'arm.poly', at: [1, 3, 5] },
 ]);
 
 /** Crawler pods, steel, and a bar spinner. Slow, heavy, and it hits back. */
 export const BRUISER: Design = build('BRUISER', [
-  // Wide stance, everything heavy on the deck, spinner overhanging the nose so
-  // its swept circle never meets a wheel.
   { part: 'drive.crawler', at: [0, 0, 0] },
-  { part: 'drive.crawler', at: [7, 0, 0] },
-  { part: 'drive.crawler', at: [0, 0, 6] },
-  { part: 'drive.crawler', at: [7, 0, 6] },
-  { part: 'str.plate', at: [2, 2, 1] },
-  { part: 'str.plate', at: [5, 2, 1] },
-  { part: 'str.plate', at: [2, 2, 4] },
-  { part: 'str.plate', at: [5, 2, 4] },
-  { part: 'bat.lipo6s', at: [3, 3, 3] },
-  { part: 'bat.supercap', at: [6, 3, 3] },
-  { part: 'ctl.advanced', at: [2, 3, 2] },
-  { part: 'arm.steel', at: [3, 3, 6] },
-  { part: 'wpn.bar', at: [2, 3, -3] },
+  { part: 'drive.crawler', at: [5, 0, 0] },
+  { part: 'drive.crawler', at: [0, 0, 5] },
+  { part: 'drive.crawler', at: [5, 0, 5] },
+  { part: 'str.plate', at: [1, 2, 1] },
+  { part: 'str.plate', at: [1, 2, 4] },
+  { part: 'str.rail', at: [3, 2, 0], yaw: 1 },
+  { part: 'str.rail', at: [4, 2, 6], yaw: 1 },
+  { part: 'bat.lipo6s', at: [1, 3, 1] },
+  { part: 'bat.supercap', at: [1, 3, 3] },
+  { part: 'ctl.advanced', at: [1, 3, 5] },
+  { part: 'arm.steel', at: [1, 3, 7] },
+  // The spinner overhangs the nose on its own rail, so its swept circle never
+  // meets a wheel.
+  { part: 'str.rail', at: [1, 2, -2] },
+  { part: 'wpn.bar', at: [-1, 3, -2] },
 ]);
 
 /** Tracks and titanium. Enormous grip, hard to flip, no weapon at all. */
 export const BULWARK: Design = build('BULWARK', [
-  // Four track units, two per side in line. A tracked vehicle that is wider
-  // than it is long pitches over under its own acceleration; length is the
-  // whole point of tracks.
+  // Track units are 2x2x4, so two per side in line makes a long, low hull.
+  // A tracked vehicle wider than it is long pitches over under its own
+  // acceleration; length is the whole point of tracks.
   { part: 'drive.tread', at: [0, 0, 0] },
-  { part: 'drive.tread', at: [6, 0, 0] },
-  { part: 'drive.tread', at: [0, 0, 4] },
-  { part: 'drive.tread', at: [6, 0, 4] },
-  { part: 'str.plate', at: [2, 2, 1] },
-  { part: 'str.plate', at: [2, 2, 4] },
-  { part: 'bat.lifepo', at: [2, 3, 2] },
-  { part: 'bat.lipo6s', at: [5, 3, 5] },
-  { part: 'ctl.basic', at: [5, 3, 2] },
-  { part: 'arm.titanium', at: [2, 3, 6] },
-  { part: 'util.ballast', at: [2, 3, 0] },
-  { part: 'util.ballast', at: [5, 3, 0] },
+  { part: 'drive.tread', at: [5, 0, 0] },
+  { part: 'drive.tread', at: [0, 0, 5] },
+  { part: 'drive.tread', at: [5, 0, 5] },
+  { part: 'str.plate', at: [1, 2, 1] },
+  { part: 'str.plate', at: [1, 2, 4] },
+  { part: 'str.rail', at: [3, 2, 0], yaw: 1 },
+  { part: 'str.rail', at: [4, 2, 6], yaw: 1 },
+  { part: 'bat.lifepo', at: [1, 3, 1] },
+  { part: 'ctl.basic', at: [1, 3, 3] },
+  { part: 'bat.lipo6s', at: [1, 3, 5] },
+  { part: 'arm.titanium', at: [1, 3, 7] },
+  // Ballast low and outboard, where it does the most for the tip angle.
+  { part: 'util.ballast', at: [3, 3, 0] },
+  { part: 'util.ballast', at: [4, 3, 0] },
 ]);
 
 /** Sprint pods and a flipper. Wins by putting the other machine on its back. */
 export const TIPPER: Design = build('TIPPER', [
-  // Long and wide: a flipper needs to survive its own recoil.
+  // The fastest machine here, so it gets the longest wheelbase of the four.
   { part: 'drive.sprint', at: [0, 0, 0] },
-  { part: 'drive.sprint', at: [6, 0, 0] },
+  { part: 'drive.sprint', at: [5, 0, 0] },
   { part: 'drive.sprint', at: [0, 0, 6] },
-  { part: 'drive.sprint', at: [6, 0, 6] },
-  { part: 'str.plate', at: [2, 2, 1] },
-  { part: 'str.plate', at: [2, 2, 4] },
-  { part: 'bat.lipo6s', at: [2, 3, 2] },
-  { part: 'ctl.basic', at: [5, 3, 3] },
-  { part: 'wpn.flipper', at: [2, 3, 7] },
+  { part: 'drive.sprint', at: [5, 0, 6] },
+  { part: 'str.plate', at: [1, 2, 1] },
+  { part: 'str.plate', at: [1, 2, 4] },
+  { part: 'str.rail', at: [3, 2, 0], yaw: 1 },
+  { part: 'str.rail', at: [3, 2, 7], yaw: 1 },
+  { part: 'bat.lipo6s', at: [1, 3, 1] },
+  { part: 'ctl.basic', at: [1, 3, 3] },
+  // The flipper hangs off the tail deck, which is what takes the recoil.
+  { part: 'wpn.flipper', at: [1, 3, 5] },
 ]);
 
 export const PRESETS: readonly Design[] = [SCOUT, BRUISER, BULWARK, TIPPER];

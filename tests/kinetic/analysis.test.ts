@@ -7,16 +7,22 @@ function place(design: Design, partId: string, x: number, y: number, z: number, 
   return addPlacement(design, { uid: newUid(), partId, cell: { x, y, z }, yaw });
 }
 
-/** A symmetric four-wheel rover: plate on top, four pods at the corners. */
+/**
+ * A symmetric four-wheel rover: plate on top, four pods at the corners.
+ *
+ * The stance is 3 cells, not 4, because a 3x3 deck plate physically reaches
+ * that far and no further. At 4 the pods shared no face with the deck, and the
+ * fixture was quietly describing a machine whose wheels were bolted to nothing.
+ */
 function rover(): Design {
   let d = emptyDesign('ROVER');
   d = place(d, 'drive.balanced', 0, 0, 0);
-  d = place(d, 'drive.balanced', 4, 0, 0);
-  d = place(d, 'drive.balanced', 0, 0, 4);
-  d = place(d, 'drive.balanced', 4, 0, 4);
+  d = place(d, 'drive.balanced', 3, 0, 0);
+  d = place(d, 'drive.balanced', 0, 0, 3);
+  d = place(d, 'drive.balanced', 3, 0, 3);
   d = place(d, 'str.plate', 1, 2, 1);
-  d = place(d, 'bat.lipo6s', 1, 3, 2);
-  d = place(d, 'ctl.basic', 4, 3, 2);
+  d = place(d, 'bat.lipo6s', 1, 3, 1);
+  d = place(d, 'ctl.basic', 1, 4, 1);
   return d;
 }
 
@@ -24,12 +30,12 @@ describe('centre of mass', () => {
   it('is centred on a symmetric design', () => {
     let d = emptyDesign('SYM');
     d = place(d, 'drive.balanced', 0, 0, 0);
-    d = place(d, 'drive.balanced', 4, 0, 0);
-    d = place(d, 'drive.balanced', 0, 0, 4);
-    d = place(d, 'drive.balanced', 4, 0, 4);
+    d = place(d, 'drive.balanced', 3, 0, 0);
+    d = place(d, 'drive.balanced', 0, 0, 3);
+    d = place(d, 'drive.balanced', 3, 0, 3);
     const a = analyse(d);
-    expect(a.centreOfMass.x).toBeCloseTo(3 * CELL, 6);
-    expect(a.centreOfMass.z).toBeCloseTo(3 * CELL, 6);
+    expect(a.centreOfMass.x).toBeCloseTo(2.5 * CELL, 6);
+    expect(a.centreOfMass.z).toBeCloseTo(2.5 * CELL, 6);
   });
 
   it('shifts toward added mass', () => {
@@ -66,14 +72,21 @@ describe('stability', () => {
 
   it('widening the wheelbase raises the tip angle', () => {
     const narrow = analyse(rover());
+    // Twice the stance in both axes, bridged by four deck plates so it stays
+    // one assembly — a machine is only wider if the axles are actually joined.
+    // Same payload, carried at the same height and centred the same way, so the
+    // only thing that differs between the two is how far apart the wheels are.
     let wide = emptyDesign('WIDE');
     wide = place(wide, 'drive.balanced', 0, 0, 0);
-    wide = place(wide, 'drive.balanced', 8, 0, 0);
-    wide = place(wide, 'drive.balanced', 0, 0, 4);
-    wide = place(wide, 'drive.balanced', 8, 0, 4);
-    wide = place(wide, 'str.plate', 3, 2, 1);
-    wide = place(wide, 'bat.lipo6s', 3, 3, 2);
-    wide = place(wide, 'ctl.basic', 6, 3, 2);
+    wide = place(wide, 'drive.balanced', 6, 0, 0);
+    wide = place(wide, 'drive.balanced', 0, 0, 6);
+    wide = place(wide, 'drive.balanced', 6, 0, 6);
+    wide = place(wide, 'str.plate', 1, 2, 1);
+    wide = place(wide, 'str.plate', 4, 2, 1);
+    wide = place(wide, 'str.plate', 1, 2, 4);
+    wide = place(wide, 'str.plate', 4, 2, 4);
+    wide = place(wide, 'bat.lipo6s', 3, 3, 3);
+    wide = place(wide, 'ctl.basic', 3, 4, 3);
     expect(analyse(wide).tipG).toBeGreaterThan(narrow.tipG);
   });
 });
@@ -81,9 +94,9 @@ describe('stability', () => {
 describe('drivetrain', () => {
   const build = (pod: string, battery = 'bat.lipo6s'): ReturnType<typeof analyse> => {
     let d = emptyDesign('X');
-    for (const [x, z] of [[0, 0], [4, 0], [0, 4], [4, 4]]) d = place(d, pod, x!, 0, z!);
-    d = place(d, battery, 1, 2, 2);
-    d = place(d, 'ctl.basic', 4, 2, 2);
+    for (const [x, z] of [[0, 0], [3, 0], [0, 3], [3, 3]]) d = place(d, pod, x!, 0, z!);
+    d = place(d, battery, 1, 2, 1);
+    d = place(d, 'ctl.basic', 1, 3, 1);
     return analyse(d);
   };
 

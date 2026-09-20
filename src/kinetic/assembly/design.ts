@@ -73,19 +73,108 @@ export function occupancyMap(design: Design): Map<string, Placement> {
   return map;
 }
 
+/** The six face neighbours of a cell. Parts join across faces, not corners. */
+const FACE_NEIGHBOURS: readonly (readonly [number, number, number])[] = [
+  [1, 0, 0],
+  [-1, 0, 0],
+  [0, 1, 0],
+  [0, -1, 0],
+  [0, 0, 1],
+  [0, 0, -1],
+];
+
 /**
- * Can this placement go here? Only two rules: stay above the floor, and do not
- * overlap anything already placed. Everything else is allowed — including
- * designs that cannot possibly work, because discovering that is the lesson.
+ * Does this placement touch anything already in the design?
+ *
+ * Face contact, not corner contact: two parts meeting only at an edge or a
+ * corner have no surface to bolt through, and a real machine could not be
+ * assembled that way.
+ */
+export function touchesDesign(design: Design, placement: Placement, ignoreUid?: string): boolean {
+  const occupied = occupancyMapExcluding(design, ignoreUid);
+  if (occupied.size === 0) return true;
+
+  for (const cell of occupiedCells(placement)) {
+    for (const [dx, dy, dz] of FACE_NEIGHBOURS) {
+      const neighbour = key({ x: cell.x + dx, y: cell.y + dy, z: cell.z + dz });
+      const found = occupied.get(neighbour);
+      if (found !== undefined && found.uid !== placement.uid) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Can this placement go here?
+ *
+ * Three rules: stay above the floor, do not overlap anything already placed,
+ * and bolt to something. Everything beyond that is allowed — including
+ * machines that cannot possibly work, because discovering that is the lesson.
+ *
+ * The attachment rule is the one that was missing, and its absence made the
+ * whole premise incoherent: a part could be dropped forty cells away in mid
+ * air and the simulation would weld it into the chassis anyway, so a wheel
+ * bolted to nothing still drove the machine. A lattice you can build
+ * disconnected islands on is not an assembly system.
  */
 export function canPlace(design: Design, placement: Placement, ignoreUid?: string): boolean {
   if (placement.cell.y < 0) return false;
+
+  const occupied = occupancyMapExcluding(design, ignoreUid);
+  const overlaps = occupiedCells(placement).some((cell) => occupied.has(key(cell)));
+  if (overlaps) return false;
+
+  return touchesDesign(design, placement, ignoreUid);
+}
+
+function occupancyMapExcluding(design: Design, ignoreUid?: string): Map<string, Placement> {
   const occupied = new Map<string, Placement>();
   for (const existing of design.placements) {
     if (existing.uid === ignoreUid) continue;
     for (const cell of occupiedCells(existing)) occupied.set(key(cell), existing);
   }
-  return occupiedCells(placement).every((cell) => !occupied.has(key(cell)));
+  return occupied;
+}
+
+/**
+ * Groups the design into runs of parts that are bolted to each other.
+ *
+ * One group means one machine. More than one means the design is really
+ * several machines that happen to share a save file, and the simulation would
+ * silently weld them into one rigid body.
+ */
+export function assemblies(design: Design): Placement[][] {
+  const cellOwner = occupancyMap(design);
+  const groupOf = new Map<string, number>();
+  const groups: Placement[][] = [];
+
+  for (const placement of design.placements) {
+    if (groupOf.has(placement.uid)) continue;
+
+    // Flood fill outward across face contacts from this placement.
+    const index = groups.length;
+    const members: Placement[] = [];
+    const queue: Placement[] = [placement];
+    groupOf.set(placement.uid, index);
+
+    while (queue.length > 0) {
+      const current = queue.pop();
+      if (current === undefined) break;
+      members.push(current);
+
+      for (const cell of occupiedCells(current)) {
+        for (const [dx, dy, dz] of FACE_NEIGHBOURS) {
+          const found = cellOwner.get(key({ x: cell.x + dx, y: cell.y + dy, z: cell.z + dz }));
+          if (found !== undefined && !groupOf.has(found.uid)) {
+            groupOf.set(found.uid, index);
+            queue.push(found);
+          }
+        }
+      }
+    }
+    groups.push(members);
+  }
+  return groups;
 }
 
 export function addPlacement(design: Design, placement: Placement): Design {

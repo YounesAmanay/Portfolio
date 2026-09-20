@@ -13,6 +13,7 @@
 import { CELL, GRAVITY, clamp } from '../core/units';
 import type { PartDef } from '../parts/types';
 import {
+  assemblies,
   occupiedCells,
   partOf,
   placementCentre,
@@ -249,6 +250,18 @@ export function analyse(design: Design): Analysis {
   if (design.placements.length === 0) {
     problems.push({ severity: 'error', message: 'Nothing built yet. Start with a chassis plate.' });
   } else {
+    // A design can arrive here already broken: loaded from storage, pasted as
+    // a build code, or written by hand before the attachment rule existed.
+    const groups = assemblies(design);
+    if (groups.length > 1) {
+      const loose = design.placements.length - (groups[0]?.length ?? 0);
+      problems.push({
+        severity: 'error',
+        message:
+          `${loose} part${loose === 1 ? ' is' : 's are'} not bolted to the machine. ` +
+          'Parts must share a face with the rest of the build.',
+      });
+    }
     if (!hasController) {
       problems.push({ severity: 'error', message: 'No controller. Every machine needs one to accept commands.' });
     }
