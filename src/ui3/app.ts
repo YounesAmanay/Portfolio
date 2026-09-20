@@ -422,7 +422,7 @@ class App {
     }
 
     const speed = robotSpeed(session.player);
-    const top = Math.max(1, session.player.analysis.topSpeed);
+    const top = Math.max(1, session.player.plan.topSpeed);
     setGauge(this.#hud, 'speed', speed / top, `${speed.toFixed(1)} m/s`);
 
     const charge = session.player.capacity > 0 ? session.player.energy / session.player.capacity : 0;

@@ -49,13 +49,13 @@ export class DamageTracker {
     }
     for (const wheel of robot.wheels) {
       for (let i = 0; i < wheel.body.numColliders(); i++) {
-        this.#owners.set(wheel.body.collider(i).handle, { robot, uid: wheel.placement.uid });
+        this.#owners.set(wheel.body.collider(i).handle, { robot, uid: wheel.uid });
       }
     }
     for (const weapon of robot.weapons) {
       if (!weapon.body) continue;
       for (let i = 0; i < weapon.body.numColliders(); i++) {
-        this.#owners.set(weapon.body.collider(i).handle, { robot, uid: weapon.placement.uid });
+        this.#owners.set(weapon.body.collider(i).handle, { robot, uid: weapon.uid });
       }
     }
   }
@@ -156,20 +156,20 @@ export class DamageTracker {
 
     // Losing a wheel is not the same as losing a bracket.
     for (const wheel of robot.wheels) {
-      if (wheel.placement.uid === state.placement.uid) wheel.attached = false;
+      if (wheel.part.uid === state.part.uid) wheel.attached = false;
     }
     for (const weapon of robot.weapons) {
-      if (weapon.placement.uid === state.placement.uid) weapon.attached = false;
+      if (weapon.uid === state.part.uid) weapon.attached = false;
     }
     for (const thruster of robot.thrusters) {
-      if (thruster.placement.uid === state.placement.uid) thruster.attached = false;
+      if (thruster.uid === state.part.uid) thruster.attached = false;
     }
 
     // A machine is finished when it loses the parts that make it a machine.
-    if (state.part.controller) {
+    if (state.part.commands) {
       robot.alive = false;
       robot.destroyedReason = 'Controller torn off — no way to command it.';
-    } else if (state.part.battery && remainingCapacity(robot) <= 0) {
+    } else if (state.part.stores !== undefined && remainingCapacity(robot) <= 0) {
       robot.alive = false;
       robot.destroyedReason = 'Last battery destroyed.';
     } else if (robot.wheels.every((w) => !w.attached) && robot.thrusters.every((t) => !t.attached)) {
@@ -182,7 +182,7 @@ export class DamageTracker {
 function remainingCapacity(robot: RobotHandle): number {
   let total = 0;
   for (const [, state] of robot.parts) {
-    if (state.attached && state.part.battery) total += state.part.battery.capacity;
+    if (state.attached) total += state.part.stores ?? 0;
   }
   return total;
 }
@@ -215,9 +215,9 @@ function impactEnergy(a: Owned | undefined, b: Owned | undefined): number {
 
 function rimSpeed(owned: Owned | undefined): number {
   if (!owned) return 0;
-  const weapon = owned.robot.weapons.find((w) => w.placement.uid === owned.uid);
-  if (!weapon?.body || !weapon.part.weapon?.reach) return 0;
+  const weapon = owned.robot.weapons.find((w) => w.uid === owned.uid);
+  if (!weapon?.body || weapon.spec.reach <= 0) return 0;
   const angular = weapon.body.angvel();
   const omega = Math.hypot(angular.x, angular.y, angular.z);
-  return omega * weapon.part.weapon.reach;
+  return omega * weapon.spec.reach;
 }

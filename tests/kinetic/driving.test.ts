@@ -166,9 +166,7 @@ describe('tyres', () => {
     world.addGround(60, { friction: 1.0, restitution: 0.05 });
     const robot = spawnRobot(world.world, SCOUT, { position: { x: 0, z: 0 } });
     for (const wheel of robot.wheels) {
-      const spec = wheel.part.drive ?? wheel.part.roller;
-      expect(spec).toBeDefined();
-      expect(spec!.lateralGrip).toBeLessThan(spec!.grip);
+      expect(wheel.spec.lateralGrip).toBeLessThan(wheel.spec.grip);
     }
   });
 });

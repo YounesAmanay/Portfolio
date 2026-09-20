@@ -33,18 +33,12 @@ import {
   HAMMER_STRIKE,
   SPINNER_TORQUE_CEILING,
 } from '../core/tuning';
-import {
-  occupiedCells,
-  partOf,
-  placementCentre,
-  placementHalfExtents,
-  type Design,
-  type Placement,
-} from '../assembly/design';
-import { analyse, contactsFor, type Analysis } from '../assembly/analysis';
+import { occupiedCells, type Design } from '../assembly/design';
+import type { Yaw } from '../assembly/lattice';
+import type { Build } from '../machine/build';
+import { planFromBuild, planFromDesign, planRestHeight, type MachinePlan, type PlannedPart } from './plan';
 import { CELL } from '../core/units';
 import { robotCollisionGroups } from './world';
-import type { PartDef } from '../parts/types';
 
 export interface ControlInput {
   /** -1 reverse .. +1 forward. */
@@ -89,8 +83,12 @@ export interface DriveSpec {
 }
 
 export interface WheelRuntime {
-  readonly placement: Placement;
-  readonly part: PartDef;
+  /** The planned part this contact belongs to. */
+  readonly part: PlannedPart;
+  /** Unique per contact: a track has two and they move independently. */
+  readonly uid: string;
+  /** Spin axis in chassis space. */
+  readonly axis: RAPIER.Vector3;
   /** What this contact does. The only drivetrain numbers the simulation reads. */
   readonly spec: DriveSpec;
   readonly body: RAPIER.RigidBody;
@@ -101,48 +99,44 @@ export interface WheelRuntime {
   readonly torqueShare: number;
   /** Slope of the torque curve, N·m per rad/s. Reference figure for the HUD. */
   readonly damping: number;
+  /** Mass of this contact's body, kg. */
+  readonly mass: number;
+  /** Its moment of inertia about the spin axis, kg·m². */
+  readonly inertia: number;
   /** Motor winding temperature, °C. */
   temperature: number;
   attached: boolean;
 }
 
-/** The part model's view of a contact, for as long as that model ships. */
-function specOfPart(part: PartDef): DriveSpec | null {
-  const drive = part.drive;
-  if (drive) {
-    return {
-      driven: true,
-      radius: drive.radius,
-      width: drive.width,
-      grip: drive.grip,
-      lateralGrip: drive.lateralGrip,
-      wheelTorque: drive.wheelTorque,
-      freeSpeed: drive.freeSpeed,
-      peakWatts: drive.peakWatts,
-    };
-  }
-  const roller = part.roller;
-  if (roller) {
-    return {
-      driven: false,
-      radius: roller.radius,
-      width: roller.width,
-      grip: roller.grip,
-      lateralGrip: roller.lateralGrip,
-      wheelTorque: 0,
-      freeSpeed: 0,
-      peakWatts: 0,
-    };
-  }
-  return null;
-}
-
 /** Where an arm weapon is in its cycle. */
 export type ArmPhase = 'READY' | 'STRIKING' | 'DWELL' | 'RETURNING' | 'RELOADING';
 
+/**
+ * What the simulation needs to know about one weapon.
+ *
+ * The same seam as `DriveSpec`. A spinner's torque and free speed are not
+ * properties of the disc: they come from the motor and gearbox behind it, and
+ * under the component model the solver derives them from a real chain. The
+ * simulation reads this and never asks which model produced it.
+ */
+export interface WeaponSpecRuntime {
+  readonly kind: 'SPINNER' | 'SAW' | 'HAMMER' | 'FLIPPER';
+  /** Shaft torque for a spinner, pivot torque for an arm. N·m. */
+  readonly torque: number;
+  /** Free speed, rad/s. Spinners only. */
+  readonly maxSpin: number;
+  /** Moment of inertia about the hinge, kg·m². */
+  readonly inertia: number;
+  /** Reach beyond the part's own bounds, m. */
+  readonly reach: number;
+  readonly peakWatts: number;
+}
+
 export interface WeaponRuntime {
-  readonly placement: Placement;
-  readonly part: PartDef;
+  readonly part: PlannedPart;
+  readonly uid: string;
+  /** What this weapon does. The only weapon numbers the simulation reads. */
+  readonly spec: WeaponSpecRuntime;
   readonly body: RAPIER.RigidBody | null;
   readonly joint: RAPIER.ImpulseJoint | null;
   /** Hinge axis in chassis space, for reading the true spin rate back. */
@@ -157,16 +151,17 @@ export interface WeaponRuntime {
 }
 
 export interface ThrusterRuntime {
-  readonly placement: Placement;
-  readonly part: PartDef;
+  readonly part: PlannedPart;
+  readonly uid: string;
+  readonly thrust: number;
+  readonly peakWatts: number;
   /** Offset from the chassis origin, metres. */
   readonly offset: RAPIER.Vector3;
   attached: boolean;
 }
 
 export interface PartState {
-  readonly placement: Placement;
-  readonly part: PartDef;
+  readonly part: PlannedPart;
   /** Remaining impact energy this part can absorb, J. */
   integrity: number;
   attached: boolean;
@@ -176,8 +171,7 @@ export interface PartState {
 
 export interface RobotHandle {
   readonly id: string;
-  readonly design: Design;
-  readonly analysis: Analysis;
+  readonly plan: MachinePlan;
   readonly chassis: RAPIER.RigidBody;
   readonly wheels: WheelRuntime[];
   readonly weapons: WeaponRuntime[];
@@ -266,8 +260,8 @@ function armAngles(kind: string): { rest: number; strike: number; dwell: number;
  * machine's forward direction is +Z — which is the convention the whole
  * builder and camera assume.
  */
-function wheelAxis(placement: Placement): RAPIER.Vector3 {
-  return placement.yaw % 2 === 0 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 0, z: 1 };
+function wheelAxis(yaw: Yaw): RAPIER.Vector3 {
+  return yaw % 2 === 0 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 0, z: 1 };
 }
 
 export interface SpawnOptions {
@@ -291,41 +285,40 @@ export interface SpawnOptions {
  * is the difference between testing a design and testing a fall.
  */
 export function restHeight(design: Design, groundY = 0, gap = 0.01): number {
-  const analysis = analyse(design);
-  let lowest = Infinity;
-
-  for (const placement of design.placements) {
-    const part = partOf(placement);
-    const centre = placementCentre(placement);
-    const localY = centre.y - analysis.centreOfMass.y;
-    const spec = part.drive ?? part.roller;
-    if (spec) {
-      lowest = Math.min(lowest, localY - spec.radius);
-    } else {
-      lowest = Math.min(lowest, localY - placementHalfExtents(placement).y);
-    }
-  }
-
-  return Number.isFinite(lowest) ? groundY + gap - lowest : groundY + 0.5;
+  return planRestHeight(planFromDesign(design), groundY, gap);
 }
 
-export function spawnRobot(
+/** Spawns a machine built from parts. */
+export function spawnRobot(world: RAPIER.World, design: Design, options: SpawnOptions): RobotHandle {
+  return spawnPlan(world, planFromDesign(design), options);
+}
+
+/**
+ * Spawns a machine assembled from components.
+ *
+ * Identical physics, because it is the same function — the only difference is
+ * where the numbers came from, and in this case they came from the solver.
+ */
+export function spawnMachine(world: RAPIER.World, build: Build, options: SpawnOptions): RobotHandle {
+  return spawnPlan(world, planFromBuild(build), options);
+}
+
+export function spawnPlan(
   world: RAPIER.World,
-  design: Design,
+  plan: MachinePlan,
   options: SpawnOptions,
 ): RobotHandle {
-  const analysis = analyse(design);
   const yaw = options.yaw ?? 0;
   const groups = robotCollisionGroups(options.group ?? 0);
 
   // Work in design space centred on the footprint so the body's origin is
   // somewhere sensible; Rapier then computes the true centre of mass from the
   // colliders themselves.
-  const origin = analysis.centreOfMass;
+  const origin = plan.centreOfMass;
   const offset: RAPIER.Vector3 = { x: -origin.x, y: -origin.y, z: -origin.z };
 
   const spawnY =
-    options.position.y ?? restHeight(design, options.groundY ?? 0, options.dropGap ?? 0.01);
+    options.position.y ?? planRestHeight(plan, options.groundY ?? 0, options.dropGap ?? 0.01);
 
   // Spawn rotation, needed for every child body's world position. Placing a
   // wheel at its unrotated offset while the chassis carries a yaw leaves the
@@ -358,28 +351,22 @@ export function spawnRobot(
   const weapons: WeaponRuntime[] = [];
   const thrusters: ThrusterRuntime[] = [];
 
-  let capacity = 0;
-  let peakWatts = 0;
+  const capacity = plan.energy;
+  const peakWatts = plan.peakWatts;
 
-  for (const placement of design.placements) {
-    const part = partOf(placement);
-    const centre = placementCentre(placement);
+  for (const part of plan.parts) {
+    const centre = part.centre;
     const local: RAPIER.Vector3 = {
       x: centre.x + offset.x,
       y: centre.y + offset.y,
       z: centre.z + offset.z,
     };
 
-    if (part.battery) {
-      capacity += part.battery.capacity;
-      peakWatts += part.battery.peakWatts;
-    }
+    const state: PartState = { part, integrity: part.integrity, attached: true, colliderHandle: null };
+    parts.set(part.uid, state);
 
-    const state: PartState = { placement, part, integrity: part.integrity, attached: true, colliderHandle: null };
-    parts.set(placement.uid, state);
-
-    const spec = specOfPart(part);
-    if (spec) {
+    const spec = part.drive;
+    if (spec && part.contacts) {
       // ── rolling contacts: own body, joined by a free hinge ──────────────
       //
       // A wheel pod produces one contact; a track unit produces two, one near
@@ -388,15 +375,15 @@ export function spawnRobot(
       // over the instant it is asked to move. Using the same contact geometry
       // the builder reports keeps the analysis and the simulation honest with
       // each other.
-      const axis = wheelAxis(placement);
-      const contacts = contactsFor(placement, part);
-      const shareOfMass = part.mass * 0.6 / Math.max(1, contacts.length);
+      const axis = wheelAxis(part.yaw);
+      const contacts = part.contacts;
 
       for (const contact of contacts) {
+        const shareOfMass = contact.mass;
         const contactLocal: RAPIER.Vector3 = {
-          x: contact.position.x + offset.x,
+          x: contact.centre.x + offset.x,
           y: local.y,
-          z: contact.position.z + offset.z,
+          z: contact.centre.z + offset.z,
         };
 
         const worldPos = toWorld(contactLocal);
@@ -444,12 +431,15 @@ export function spawnRobot(
         );
 
         wheels.push({
-          placement, part, spec, body: wheelBody, joint,
+          part, uid: contact.uid, axis, spec, body: wheelBody, joint,
           side: Math.sign(contactLocal.x) || 1,
           // Torque is split across a unit's contacts so total output is
           // unchanged whether it rolls on one wheel or a whole track.
-          torqueShare: 1 / contacts.length,
+          torqueShare: contact.share,
           damping: spec.driven ? spec.wheelTorque / Math.max(1, spec.freeSpeed) : 0.02,
+          mass: shareOfMass,
+          // The cylinder we just made: half m r² about its own axis.
+          inertia: Math.max(1e-6, 0.5 * shareOfMass * spec.radius * spec.radius),
           temperature: AMBIENT_C,
           attached: true,
         });
@@ -458,11 +448,12 @@ export function spawnRobot(
     }
 
     // ── everything else ───────────────────────────────────────────────────
-    const half = placementHalfExtents(placement);
+    const half = part.half;
+    const weaponSpec = part.weapon;
     // Every weapon lives in its own body on a hinge, so it must NOT also get a
     // collider on the chassis: two solids in the same place resolve their
     // overlap explosively and launch the machine across the arena.
-    const moves = part.weapon !== undefined;
+    const moves = weaponSpec !== undefined;
 
     if (!moves) {
       const collider = world.createCollider(
@@ -480,10 +471,17 @@ export function spawnRobot(
     }
 
     if (part.thruster) {
-      thrusters.push({ placement, part, offset: local, attached: true });
+      thrusters.push({
+        part,
+        uid: part.uid,
+        thrust: part.thruster.thrust,
+        peakWatts: part.thruster.peakWatts,
+        offset: local,
+        attached: true,
+      });
     }
 
-    if (part.weapon) {
+    if (weaponSpec) {
       // Every weapon is a real body on a real hinge.
       //
       // Spinners already were, so their stored energy is honest: a heavy disc
@@ -494,7 +492,7 @@ export function spawnRobot(
       // launched *itself* twelve metres into the air and never touched the
       // opponent, and a hammer shoved its own chassis into the floor. Neither
       // weapon could hit anything, because neither weapon moved.
-      const spins = part.weapon.kind === 'SPINNER' || part.weapon.kind === 'SAW';
+      const spins = weaponSpec.kind === 'SPINNER' || weaponSpec.kind === 'SAW';
       const bodyPos = toWorld(local);
       const body = world.createRigidBody(
         RAPIER.RigidBodyDesc.dynamic()
@@ -507,7 +505,7 @@ export function spawnRobot(
       if (spins) {
         // Swept disc: the collider is the circle the blade sweeps, because
         // that is the volume that can actually hit something.
-        const reach = Math.max(half.x, half.z) + part.weapon.reach;
+        const reach = Math.max(half.x, half.z) + weaponSpec.reach;
         const shape = RAPIER.ColliderDesc.cylinder(Math.max(0.012, half.y * 0.8), reach)
           .setFriction(0.35)
           .setRestitution(0.5)
@@ -521,9 +519,9 @@ export function spawnRobot(
         // roughly three times heavier in rotation, so the readout and the
         // simulation disagreed about both spin-up time and hit energy. The
         // number the player is shown is the one that wins.
-        const spin = part.weapon.inertia;
+        const spin = weaponSpec.inertia;
         world.createCollider(
-          spin !== undefined
+          spin > 0
             ? shape.setMassProperties(
                 part.mass,
                 ZERO,
@@ -536,7 +534,7 @@ export function spawnRobot(
         );
       } else {
         // The business end only: a hammer is its head, not its whole envelope.
-        const head = armHead(part.weapon.kind, half);
+        const head = armHead(weaponSpec.kind, half);
         world.createCollider(
           RAPIER.ColliderDesc.cuboid(head.half.x, head.half.y, head.half.z)
             .setTranslation(head.offset.x, head.offset.y, head.offset.z)
@@ -553,7 +551,7 @@ export function spawnRobot(
       // Spinners turn about their mount; arms hinge sideways so they swing
       // fore and aft, which is the only direction that reaches a target.
       const axis = spins ? UP : LATERAL;
-      const pivot = spins ? ZERO : armPivot(part.weapon.kind, half);
+      const pivot = spins ? ZERO : armPivot(weaponSpec.kind, half);
       const joint = world.createImpulseJoint(
         RAPIER.JointData.revolute(
           { x: local.x + pivot.x, y: local.y + pivot.y, z: local.z + pivot.z },
@@ -572,7 +570,7 @@ export function spawnRobot(
         // fast as a light one and delete the reason mass is a stat on a hammer.
         revolute.configureMotorModel(RAPIER.MotorModel.ForceBased);
         // Stops on the swing, so an arm cannot wind itself round and round.
-        const limits = armLimits(part.weapon.kind);
+        const limits = armLimits(weaponSpec.kind);
         revolute.setLimits(limits.min, limits.max);
       }
       // Spinners get no motor configured at all. Touching the motor model on a
@@ -583,8 +581,9 @@ export function spawnRobot(
       // They are driven by torque impulses in driveRobot instead.
 
       weapons.push({
-        placement,
         part,
+        uid: part.uid,
+        spec: weaponSpec,
         body,
         joint,
         axis,
@@ -598,8 +597,8 @@ export function spawnRobot(
   }
 
   return {
-    id: options.id ?? design.name,
-    design, analysis, chassis, wheels, weapons, thrusters, parts,
+    id: options.id ?? plan.name,
+    plan, chassis, wheels, weapons, thrusters, parts,
     originOffset: offset,
     energy: capacity,
     capacity,
@@ -609,7 +608,7 @@ export function spawnRobot(
     world,
     // Static share, not a live load transfer: good enough as a traction
     // ceiling, and it costs nothing per step to know.
-    weightPerContact: (analysis.mass * -GRAVITY) / Math.max(1, wheels.length),
+    weightPerContact: (plan.mass * -GRAVITY) / Math.max(1, wheels.length),
     alive: true,
     destroyedReason: null,
   };
@@ -634,10 +633,10 @@ export function driveRobot(robot: RobotHandle, input: ControlInput): void {
     demand += wheel.spec.peakWatts * wheel.torqueShare * clamp01(throttle);
   }
   for (const thruster of robot.thrusters) {
-    if (thruster.attached && thruster.part.thruster) demand += thruster.part.thruster.peakWatts * clamp01(input.lift);
+    if (thruster.attached) demand += thruster.peakWatts * clamp01(input.lift);
   }
   for (const weapon of robot.weapons) {
-    if (weapon.attached && weapon.part.weapon) demand += weapon.part.weapon.peakWatts * clamp01(input.weapon);
+    if (weapon.attached) demand += weapon.spec.peakWatts * clamp01(input.weapon);
   }
 
   robot.draw = demand;
@@ -679,7 +678,7 @@ export function driveRobot(robot: RobotHandle, input: ControlInput): void {
     // rather than merely coasting.
     const command = clamp(input.drive - differential * wheel.side, -1, 1);
 
-    const axisWorld = rotateVector(wheelAxis(wheel.placement), chassisRotation);
+    const axisWorld = rotateVector(wheel.axis, chassisRotation);
     const angvel = wheel.body.angvel();
     const spin = angvel.x * axisWorld.x + angvel.y * axisWorld.y + angvel.z * axisWorld.z;
 
@@ -715,9 +714,9 @@ export function driveRobot(robot: RobotHandle, input: ControlInput): void {
   if (lift > 0) {
     const rotation = robot.chassis.rotation();
     for (const thruster of robot.thrusters) {
-      if (!thruster.attached || !thruster.part.thruster) continue;
+      if (!thruster.attached) continue;
       // Impulse per step, for the same reason as the drivetrain above.
-      const magnitude = thruster.part.thruster.thrust * lift * PHYSICS_DT;
+      const magnitude = thruster.thrust * lift * PHYSICS_DT;
       // Thrust acts along the machine's own up axis, so a tilted multirotor
       // translates instead of climbing — exactly how they actually fly.
       const world = rotateVector(UP, rotation);
@@ -732,11 +731,11 @@ export function driveRobot(robot: RobotHandle, input: ControlInput): void {
   // ── 4. weapons ────────────────────────────────────────────────────────────
   const fire = clamp01(input.weapon) * robot.sag;
   for (const weapon of robot.weapons) {
-    if (!weapon.attached || !weapon.part.weapon || !weapon.joint) continue;
-    const spec = weapon.part.weapon;
+    if (!weapon.attached || !weapon.joint) continue;
+    const spec = weapon.spec;
 
     if (spec.kind === 'SPINNER' || spec.kind === 'SAW') {
-      if (spec.maxSpin === undefined) continue;
+      if (spec.maxSpin <= 0) continue;
 
       // A velocity motor with its torque capped at the part's rating. The
       // previous call passed `drive / maxSpin` as the motor's damping, which
@@ -759,7 +758,7 @@ export function driveRobot(robot: RobotHandle, input: ControlInput): void {
       // — it is why a big spinner fights its own steering.
       const current = spinRate(weapon, robot);
       const torque =
-        spec.drive * SPINNER_TORQUE_CEILING * fire * clamp(1 - current / spec.maxSpin, -1, 1);
+        spec.torque * SPINNER_TORQUE_CEILING * fire * clamp(1 - current / spec.maxSpin, -1, 1);
       const axisWorld = rotateVector(weapon.axis, robot.chassis.rotation());
       const tick = torque * PHYSICS_DT;
       const body = weapon.body;
@@ -816,18 +815,18 @@ function spinRate(weapon: WeaponRuntime, robot: RobotHandle): number {
  * what makes firing a decision rather than a button you hold.
  */
 function stepArm(weapon: WeaponRuntime, robot: RobotHandle, firing: boolean): void {
-  const spec = weapon.part.weapon;
+  const spec = weapon.spec;
   const joint = weapon.joint as RAPIER.RevoluteImpulseJoint | null;
-  if (!spec || !joint) return;
+  if (!joint) return;
 
   const { rest, strike, dwell, reload } = armAngles(spec.kind);
 
-  // Rated torque at full deflection, so `drive` means the same thing for an
+  // Rated torque at full deflection, so `torque` means the same thing for an
   // arm as it does for a spinner: how hard this actuator can push.
   const swing = Math.max(0.2, Math.abs(strike - rest));
-  const stiffness = spec.drive / swing;
+  const stiffness = spec.torque / swing;
   // Roughly critical for a head of this mass at this radius.
-  const inertia = Math.max(0.005, weapon.part.mass * 0.02);
+  const inertia = spec.inertia;
   const damping = 2 * ARM_DAMPING_RATIO * Math.sqrt(stiffness * inertia);
 
   weapon.timer = Math.max(0, weapon.timer - PHYSICS_DT);
@@ -960,8 +959,35 @@ function applyTraction(
   const along = velocity.x * roll.x + velocity.y * roll.y + velocity.z * roll.z;
   const slip = along - spin * spec.radius;
 
-  const cap = extra * robot.weightPerContact;
-  const force = clamp(-slip / TYRE_SLIP_REFERENCE, -1, 1) * cap;
+  // Two ceilings, and the lower one wins.
+  //
+  // The first is grip: a tyre cannot pull harder than friction allows, and
+  // that force builds with slip rather than appearing all at once.
+  const cap = extra * robot.weightPerContact * Math.min(1, Math.abs(slip) / TYRE_SLIP_REFERENCE);
+  //
+  // The second is the one that was missing, and it is not a fudge — it is what
+  // makes this friction rather than a forcing term. An impulse J changes the
+  // slip it is correcting by J*(1/m + r²/I), so anything beyond |slip| over
+  // that reverses the slip instead of removing it, and the next step reverses
+  // it back.
+  //
+  // Whether that matters depends entirely on how heavy the wheel is, which is
+  // why it went unnoticed: on a 0.3 kg pod the correction is comfortably
+  // inside the limit, but on a 54 g wheel one step's impulse moves the spin by
+  // 40 rad/s. Measured on a light four-wheeler, the wheels oscillated at
+  // ±500 rad/s — four times their free speed — with the throttle at zero, and
+  // the machine pivoted on the spot while "settling".
+  //
+  // The linear term uses the machine's mass over this contact, not the wheel
+  // body's own. The wheel is pinned to the chassis by its joint, so a force
+  // along the roll has to shift the whole machine — using the 300 g hub
+  // instead makes the cap five times tighter than it should be and quietly
+  // robs every machine of grip.
+  const carried = robot.weightPerContact / Math.abs(GRAVITY);
+  const responsiveness = 1 / Math.max(0.01, carried) + (spec.radius * spec.radius) / wheel.inertia;
+  const settle = Math.abs(slip) / (responsiveness * PHYSICS_DT);
+
+  const force = -Math.sign(slip) * Math.min(cap, settle);
   const tick = force * PHYSICS_DT;
   wheel.body.applyImpulse({ x: roll.x * tick, y: roll.y * tick, z: roll.z * tick }, true);
 

@@ -14,7 +14,7 @@
  */
 
 import * as THREE from 'three';
-import type { PartDef } from '../kinetic/parts/types';
+import type { MeshPart } from '../kinetic/appearance';
 import {
   bladeDisc,
   cannedCylinder,
@@ -29,7 +29,7 @@ import {
   tyre,
   vents,
 } from './geometry';
-import { disposeMaterials, finishFor, finishMaterial } from './materials';
+import { disposeMaterials, finishMaterial } from './materials';
 
 const geometryCache = new Map<string, THREE.BufferGeometry>();
 const materialCache = new Map<string, THREE.Material>();
@@ -53,19 +53,19 @@ function cachedGeometry(key: string, build: () => THREE.BufferGeometry): THREE.B
  * a surface lit from within cannot read as a material at all. The lamps and
  * stripes below carry it instead.
  */
-export function partMaterial(part: PartDef, opts: { ghost?: boolean } = {}): THREE.Material {
-  if (opts.ghost !== true) return finishMaterial(finishFor(part), { tint: part.visual.colour });
+export function partMaterial(part: MeshPart, opts: { ghost?: boolean } = {}): THREE.Material {
+  if (opts.ghost !== true) return finishMaterial(part.finish, { tint: part.colour });
 
   const key = `${part.id}|ghost`;
   const cached = materialCache.get(key);
   if (cached) return cached;
 
   const material = new THREE.MeshStandardMaterial({
-    color: new THREE.Color(part.visual.colour),
+    color: new THREE.Color(part.colour),
     transparent: true,
     opacity: 0.42,
     depthWrite: false,
-    emissive: new THREE.Color(part.visual.emissive ?? part.visual.colour),
+    emissive: new THREE.Color(part.emissive ?? part.colour),
     emissiveIntensity: 0.4,
     metalness: 0.2,
     roughness: 0.5,
@@ -110,7 +110,7 @@ function add(group: THREE.Group, geometry: THREE.BufferGeometry, material: THREE
  * to fill its lattice box — and, more to the point, looks like the radius the
  * simulation is actually integrating.
  */
-export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boolean } = {}): THREE.Group {
+export function buildPartMesh(part: MeshPart, size: MeshSize, opts: { ghost?: boolean } = {}): THREE.Group {
   const group = new THREE.Group();
   const ghost = opts.ghost === true;
   const body = partMaterial(part, opts);
@@ -121,18 +121,18 @@ export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boo
   const weapon = ghost ? body : weaponMetal();
   const key = `${size.x.toFixed(3)}:${size.y.toFixed(3)}:${size.z.toFixed(3)}`;
 
-  switch (part.visual.shape) {
+  switch (part.shape) {
     case 'wheel': {
-      const radius = part.drive?.radius ?? part.roller?.radius ?? Math.min(size.x, size.y) / 2;
-      const width = part.drive?.width ?? part.roller?.width ?? size.z * 0.6;
-      const driven = part.drive !== undefined;
+      const radius = part.wheel?.radius ?? Math.min(size.x, size.y) / 2;
+      const width = part.wheel?.width ?? size.z * 0.6;
+      const driven = part.wheel?.driven === true;
       const id = `${radius.toFixed(3)}:${width.toFixed(3)}`;
 
       add(group, cachedGeometry(`tyre:${id}`, () => tyre(radius, width)), body);
       add(group, cachedGeometry(`lugs:${id}`, () => treadLugs(radius, width, 18)), body);
       add(group, cachedGeometry(`rim:${id}:${driven}`, () => rimGeometry({ radius, width, driven })), detail);
 
-      if (driven && part.visual.emissive !== undefined && !ghost) {
+      if (driven && part.emissive !== undefined && !ghost) {
         const ring = add(
           group,
           cachedGeometry(`wlamp:${id}`, () => {
@@ -140,7 +140,7 @@ export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boo
             g.rotateY(Math.PI / 2);
             return g;
           }),
-          lamp(part.visual.emissive, 1.8),
+          lamp(part.emissive, 1.8),
         );
         ring.position.x = width * 0.36;
       }
@@ -149,7 +149,7 @@ export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boo
 
     case 'disc': {
       const radius = Math.max(size.x, size.z) / 2;
-      const teeth = part.weapon?.kind === 'SAW' ? 14 : 8;
+      const teeth = part.toothy === true ? 14 : 8;
       add(
         group,
         cachedGeometry(`disc:${radius.toFixed(3)}:${teeth}`, () => bladeDisc(radius, radius * 0.18, teeth)),
@@ -232,8 +232,7 @@ export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boo
 
       // Powered housings get louvres and an indicator. Dumb structure does not:
       // a ballast weight with cooling vents in it would be a lie.
-      const powered = part.battery !== undefined || part.controller !== undefined;
-      if (powered && !ghost) {
+      if (part.powered === true && !ghost) {
         const louvres = add(
           group,
           cachedGeometry(`vents:${key}`, () => vents(size.x * 0.52, size.z * 0.62, 4)),
@@ -242,11 +241,11 @@ export function buildPartMesh(part: PartDef, size: MeshSize, opts: { ghost?: boo
         louvres.position.y = size.y / 2;
       }
 
-      if (part.visual.emissive !== undefined && !ghost) {
+      if (part.emissive !== undefined && !ghost) {
         const stripe = add(
           group,
           cachedGeometry(`stripe:${key}`, () => chamferedBox(size.x * 0.62, size.y * 0.06, size.z * 0.1)),
-          lamp(part.visual.emissive),
+          lamp(part.emissive),
         );
         stripe.position.set(0, size.y / 2 + 0.0015, -size.z * 0.26);
       }

@@ -80,6 +80,15 @@ export interface SolvedWheel {
   readonly peakWatts: number;
   /** Peak current of whatever drives it, amps. */
   readonly peakAmps: number;
+  /**
+   * Mass of everything that turns with this wheel, kg: the wheel itself plus
+   * the motor and gearboxes driving it.
+   *
+   * The simulation needs it because a rolling contact is a separate rigid
+   * body, and how heavy that body is decides how violently it responds to a
+   * friction impulse. A bare 90 g wheel on a 4 kg machine is barely there.
+   */
+  readonly drivelineMass: number;
 }
 
 /**
@@ -213,6 +222,8 @@ interface Driven {
   readonly torque: number;
   readonly speed: number;
   readonly amps: number;
+  /** Mass of the source and everything between it and the target, kg. */
+  readonly mass: number;
 }
 
 export function solve(machine: Machine): Solution {
@@ -378,7 +389,11 @@ export function solve(machine: Machine): Solution {
       demandAmps += amps;
     }
 
-    return { torque, speed, amps };
+    const mass =
+      driver.component.mass +
+      chain.reduce((total, uid) => total + (graph.byUid.get(uid)?.component.mass ?? 0), 0);
+
+    return { torque, speed, amps, mass };
   };
 
   const wheels: SolvedWheel[] = [];
@@ -399,6 +414,7 @@ export function solve(machine: Machine): Solution {
       lateralGrip: spec.lateralGrip,
       peakWatts: 0,
       peakAmps: 0,
+      drivelineMass: installed.component.mass,
     };
 
     const driven = traceShaft(installed.uid);
@@ -413,6 +429,7 @@ export function solve(machine: Machine): Solution {
       freeSpeed: driven.speed,
       peakWatts: driven.amps * volts,
       peakAmps: driven.amps,
+      drivelineMass: installed.component.mass + driven.mass,
     });
   }
 

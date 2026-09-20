@@ -18,8 +18,9 @@ import {
   type Design,
   type Placement,
 } from '../kinetic/assembly/design';
-import { analyse } from '../kinetic/assembly/analysis';
+import type { PlannedPart } from '../kinetic/physics/plan';
 import type { RobotHandle } from '../kinetic/physics/robot';
+import { meshPartOfPart } from '../kinetic/appearance';
 import { buildPartMesh } from './part-mesh';
 
 const YAW_QUATS = [0, 1, 2, 3].map((yaw) =>
@@ -32,10 +33,23 @@ export function buildPlacementObject(placement: Placement, ghost = false): THREE
   const half = placementHalfExtents(placement);
   const centre = placementCentre(placement);
 
-  const mesh = buildPartMesh(part, { x: half.x * 2, y: half.y * 2, z: half.z * 2 }, { ghost });
+  const mesh = buildPartMesh(meshPartOfPart(part), { x: half.x * 2, y: half.y * 2, z: half.z * 2 }, { ghost });
   mesh.position.set(centre.x, centre.y, centre.z);
   mesh.quaternion.copy(YAW_QUATS[placement.yaw]!);
   mesh.userData.uid = placement.uid;
+  return mesh;
+}
+
+/** One planned part as a positioned object in build space. */
+export function buildPlannedObject(part: PlannedPart, ghost = false): THREE.Object3D {
+  const mesh = buildPartMesh(
+    part.render,
+    { x: part.half.x * 2, y: part.half.y * 2, z: part.half.z * 2 },
+    { ghost },
+  );
+  mesh.position.set(part.centre.x, part.centre.y, part.centre.z);
+  mesh.quaternion.copy(YAW_QUATS[part.yaw]!);
+  mesh.userData.uid = part.uid;
   return mesh;
 }
 
@@ -58,33 +72,31 @@ export class RobotView {
   readonly #weaponObjects: THREE.Object3D[] = [];
 
   constructor(private readonly robot: RobotHandle) {
-    const analysis = analyse(robot.design);
-    const com = analysis.centreOfMass;
+    const com = robot.plan.centreOfMass;
 
-    for (const placement of robot.design.placements) {
-      const part = partOf(placement);
-      const object = buildPlacementObject(placement);
+    for (const part of robot.plan.parts) {
+      const object = buildPlannedObject(part);
       // Physics puts the body origin at the centre of mass, so shift the
       // visuals to match or everything renders offset from where it collides.
       object.position.sub(new THREE.Vector3(com.x, com.y, com.z));
 
-      if (part.drive || part.roller) {
+      if (part.drive) {
         // Rendered once per unit even though a track has two contact bodies:
         // a track's belt does not visibly rotate, and two overlapping tyres
         // would read as a modelling error.
-        object.userData.wheelUid = placement.uid;
+        object.userData.wheelUid = part.uid;
         this.#wheelObjects.push(object);
         this.root.add(object);
       } else if (part.weapon) {
         // Every weapon has its own body on a hinge now, not just the spinners,
         // so hammers and flippers animate through the same path.
-        object.userData.weaponUid = placement.uid;
+        object.userData.weaponUid = part.uid;
         this.#weaponObjects.push(object);
         this.root.add(object);
       } else {
         this.chassisGroup.add(object);
       }
-      this.#partObjects.set(placement.uid, object);
+      this.#partObjects.set(part.uid, object);
     }
 
     this.root.add(this.chassisGroup);
@@ -98,7 +110,7 @@ export class RobotView {
     this.chassisGroup.quaternion.set(r.x, r.y, r.z, r.w);
 
     for (const object of this.#wheelObjects) {
-      const wheel = this.robot.wheels.find((w) => w.placement.uid === object.userData.wheelUid);
+      const wheel = this.robot.wheels.find((w) => w.part.uid === object.userData.wheelUid);
       if (!wheel) continue;
       object.visible = wheel.attached;
       const wt = wheel.body.translation();
@@ -108,7 +120,7 @@ export class RobotView {
     }
 
     for (const object of this.#weaponObjects) {
-      const weapon = this.robot.weapons.find((w) => w.placement.uid === object.userData.weaponUid);
+      const weapon = this.robot.weapons.find((w) => w.uid === object.userData.weaponUid);
       if (!weapon?.body) continue;
       object.visible = weapon.attached;
       const wt = weapon.body.translation();
